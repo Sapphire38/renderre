@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useEditor } from "@/lib/store";
 import FrontElevationEditor from "./FrontElevationEditor";
 import WorkbenchControls from "./WorkbenchControls";
 import WorkbenchPreview3D from "./WorkbenchPreview3D";
 import WorkbenchAiBar from "./WorkbenchAiBar";
+import WorkbenchCutList from "./WorkbenchCutList";
 import { CloseIcon, CabinetIcon, UndoIcon, RedoIcon, RulerIcon } from "./icons";
 import { isTypingTarget } from "@/lib/dom";
 
@@ -19,6 +20,7 @@ export default function FurnitureWorkbench() {
   const redoDraft = useEditor((s) => s.redoDraft);
   const canUndo = useEditor((s) => s.draftPast.length > 0);
   const canRedo = useEditor((s) => s.draftFuture.length > 0);
+  const [showCutList, setShowCutList] = useState(false);
 
   // Atajos de teclado del taller (solo activos mientras está abierto).
   useEffect(() => {
@@ -119,6 +121,17 @@ export default function FurnitureWorkbench() {
           </button>
           <button
             type="button"
+            onClick={() => setShowCutList((v) => !v)}
+            title="Despiece, herrajes y presupuesto"
+            className={[
+              "ml-1 flex items-center gap-1.5 rounded-md px-2 py-1 text-xs",
+              showCutList ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/40" : "text-neutral-400 hover:bg-neutral-800",
+            ].join(" ")}
+          >
+            🧾 Despiece
+          </button>
+          <button
+            type="button"
             onClick={close}
             title="Cerrar (Esc)"
             className="ml-1 grid h-8 w-8 place-items-center rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
@@ -128,7 +141,8 @@ export default function FurnitureWorkbench() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
+        {showCutList && <WorkbenchCutList onClose={() => setShowCutList(false)} />}
         <div className="w-[300px] shrink-0 border-r border-neutral-800">
           <WorkbenchControls />
         </div>

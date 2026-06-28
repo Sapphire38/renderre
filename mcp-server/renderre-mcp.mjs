@@ -321,6 +321,12 @@ const TOOLS = [
     handler: (a) => runCommand("set_render", a, "Ajustes de render"),
   },
   {
+    name: "renderre_set_pricing",
+    description: "Ajusta la lista de precios del despiece/presupuesto del Taller (moneda libre). Campos: boardW/boardH (tamaño de placa en m), boardPrice ($/placa), edgePrice ($/ml de canto), hingePrice, slidePrice (par), pullPrice, rodPrice, laborPerM2 ($/m²), yield (0..1 aprovechamiento). El despiece y presupuesto calculados se leen en get_state.cutlist. Pasá solo los campos a cambiar.",
+    inputSchema: { type: "object", properties: { boardW: num, boardH: num, boardPrice: num, edgePrice: num, hingePrice: num, slidePrice: num, pullPrice: num, rodPrice: num, laborPerM2: num, yield: num } },
+    handler: (a) => runCommand("set_pricing", a, "Lista de precios"),
+  },
+  {
     name: "renderre_place_custom",
     description: "Coloca en el plano un mueble guardado de la biblioteca (por libId o por name, de get_state.customLibrary).",
     inputSchema: { type: "object", properties: { libId: str, name: str } },

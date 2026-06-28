@@ -48,6 +48,20 @@ export type RenderSettings = {
   shadows: boolean; // proyectar sombras
 };
 
+/** Lista de precios para el despiece/presupuesto del Taller. Moneda libre. */
+export type Pricing = {
+  boardW: number; // ancho de la placa estándar (m)
+  boardH: number; // alto de la placa estándar (m)
+  boardPrice: number; // $ por placa
+  edgePrice: number; // $ por metro lineal de canto
+  hingePrice: number;
+  slidePrice: number; // $ por par de correderas
+  pullPrice: number;
+  rodPrice: number;
+  laborPerM2: number; // $ de mano de obra por m² de placa
+  yield: number; // 0..1 aprovechamiento estimado de la placa (sin nesting)
+};
+
 /** Un techo sobre un nivel: cubre la huella de los muros de ese piso. */
 export type RoofKind = "flat" | "gable";
 export type Roof = {
@@ -212,6 +226,7 @@ export type ProjectData = {
   floorMaterialId?: string;
   roofs?: Roof[]; // techos por nivel
   render?: RenderSettings; // iluminación / fondo
+  pricing?: Pricing; // lista de precios para el despiece/presupuesto
   grid: GridSettings;
   wallDefaults: WallDefaults;
 };
@@ -222,7 +237,21 @@ export type SavedProject = {
   data: ProjectData;
 };
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
+
+/** Lista de precios por defecto (valores de referencia; el usuario los ajusta). */
+export const DEFAULT_PRICING: Pricing = {
+  boardW: 1.83,
+  boardH: 2.6,
+  boardPrice: 45000,
+  edgePrice: 1200,
+  hingePrice: 1500,
+  slidePrice: 8000,
+  pullPrice: 1200,
+  rodPrice: 3000,
+  laborPerM2: 30000,
+  yield: 0.75,
+};
 
 /** Render por defecto. */
 export const DEFAULT_RENDER: RenderSettings = {

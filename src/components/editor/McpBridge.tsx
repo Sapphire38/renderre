@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useEditor } from "@/lib/store";
 import { buildScene } from "@/lib/ai-build";
+import { cutList, hardwareOf, budgetOf } from "@/lib/cutlist";
 import { saveProject, loadProject, listProjects, deleteProject } from "@/lib/storage";
 import type { SceneSpec } from "@/lib/ai-parse";
 import type {
@@ -115,9 +116,18 @@ function snapshot() {
           components: (s.draft.components ?? []).map((c) => ({
             id: c.id, kind: c.kind, x: c.x, y: c.y, w: c.w, h: c.h,
             depth: c.depth, depthInset: c.depthInset, count: c.count,
-            hinge: c.hinge, orient: c.orient, color: c.color, materialId: c.materialId, open: c.open,
+            hinge: c.hinge, orient: c.orient, shape: c.shape, color: c.color, materialId: c.materialId, open: c.open,
           })),
         }
+      : null,
+    pricing: s.pricing,
+    // Despiece + presupuesto del mueble en edición (si el Taller está abierto).
+    cutlist: s.draft
+      ? (() => {
+          const pieces = cutList(s.draft);
+          const hw = hardwareOf(s.draft);
+          return { pieces, hardware: hw, budget: budgetOf(pieces, hw, s.pricing) };
+        })()
       : null,
   };
 }
@@ -305,6 +315,13 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       if (args.background != null) patch.background = String(args.background);
       if (args.shadows != null) patch.shadows = Boolean(args.shadows);
       st.setRender(patch);
+      break;
+    }
+    case "set_pricing": {
+      const patch: Record<string, number> = {};
+      for (const k of ["boardW", "boardH", "boardPrice", "edgePrice", "hingePrice", "slidePrice", "pullPrice", "rodPrice", "laborPerM2", "yield"] as const)
+        if (args[k] != null) patch[k] = Number(args[k]);
+      st.setPricing(patch);
       break;
     }
     case "place_custom": {

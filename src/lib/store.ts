@@ -9,6 +9,7 @@ import type {
   Material,
   Opening,
   OpeningKind,
+  Pricing,
   ProjectData,
   RenderSettings,
   Roof,
@@ -24,7 +25,7 @@ import { uid } from "./geometry";
 import { carcassPanels, customFromPreset, makeComponent, makeCustomFurniture, makeFurniture } from "./furniture";
 import { makeOpening, OPENING_STYLES, defaultStyle } from "./openings";
 import { seedMaterials } from "./materials";
-import { DEFAULT_RENDER } from "./types";
+import { DEFAULT_RENDER, DEFAULT_PRICING } from "./types";
 
 const MIN_LEN = 0.02; // 2 cm: longitud mínima de un muro
 
@@ -90,6 +91,7 @@ export type EditorState = {
   floorMaterialId?: string;
   roofs: Roof[];
   render: RenderSettings;
+  pricing: Pricing;
   tool: ToolId;
   furnitureKind: FurnitureKind; // preset a colocar con la herramienta "furniture"
   openingKind: OpeningKind; // puerta/ventana a colocar
@@ -196,6 +198,7 @@ export type EditorState = {
   setFloorMaterial: (id: string | null) => void;
   setFloorLevelMaterial: (level: number, id: string | null) => void;
   setRender: (patch: Partial<RenderSettings>) => void;
+  setPricing: (patch: Partial<Pricing>) => void;
 
   setGrid: (patch: Partial<GridSettings>) => void;
   setWallDefaults: (patch: Partial<WallDefaults>) => void;
@@ -221,6 +224,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   floorMaterialId: undefined,
   roofs: [],
   render: { ...DEFAULT_RENDER },
+  pricing: { ...DEFAULT_PRICING },
   tool: "wall",
   furnitureKind: "cabinet-base",
   openingKind: "door",
@@ -791,6 +795,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       dirty: true,
     })),
   setRender: (patch) => set((s) => ({ render: { ...s.render, ...patch }, dirty: true })),
+  setPricing: (patch) => set((s) => ({ pricing: { ...s.pricing, ...patch }, dirty: true })),
 
   setGrid: (patch) => set((s) => ({ grid: { ...s.grid, ...patch }, dirty: true })),
   setWallDefaults: (patch) =>
@@ -837,6 +842,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       floorMaterialId: data.floorMaterialId,
       roofs: (data.roofs ?? []).map((r) => ({ ...r })),
       render: { ...DEFAULT_RENDER, ...(data.render ?? {}) },
+      pricing: { ...DEFAULT_PRICING, ...(data.pricing ?? {}) },
       grid: { ...data.grid },
       wallDefaults: { ...data.wallDefaults },
       projectName: name,
@@ -862,6 +868,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       floorMaterialId: s.floorMaterialId,
       roofs: s.roofs.map((r) => ({ ...r })),
       render: { ...s.render },
+      pricing: { ...s.pricing },
       grid: { ...s.grid },
       wallDefaults: { ...s.wallDefaults },
     };
@@ -878,6 +885,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       floorMaterialId: undefined,
       roofs: [],
       render: { ...DEFAULT_RENDER },
+      pricing: { ...DEFAULT_PRICING },
       selection: null,
       multi: [],
       workbenchOpen: false,

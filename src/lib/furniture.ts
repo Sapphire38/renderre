@@ -13,6 +13,10 @@ export type Panel = {
   shape?: "sphere" | "cone" | "pyramid" | "wedge"; // primitivas no-caja
   color?: string; // color propio del panel
   materialId?: string; // material propio del panel (tiene prioridad sobre color)
+  /** Rol de la pieza para el despiece (Lateral, Piso, Estante, Frente, Puerta, …). */
+  role?: string;
+  /** Cantos a la vista (bordes con tapacanto) para el despiece. Si falta, se estima. */
+  edges?: { front?: boolean; back?: boolean; left?: boolean; right?: boolean; top?: boolean; bottom?: boolean };
 };
 
 export type FurniturePreset = {
@@ -149,7 +153,7 @@ export function carcassPanels(f: Furniture): Panel[] {
   const panels: Panel[] = [];
 
   if (f.kind === "countertop") {
-    panels.push({ pos: [0, base + H / 2, 0], size: [W, H, D] });
+    panels.push({ pos: [0, base + H / 2, 0], size: [W, H, D], role: "Mesada", edges: { front: true, left: true, right: true } });
     return panels;
   }
 
@@ -157,7 +161,7 @@ export function carcassPanels(f: Furniture): Panel[] {
     const topT = Math.max(t, 0.025);
     const legD = 0.06;
     const legH = Math.max(H - topT, 0.05);
-    panels.push({ pos: [0, base + H - topT / 2, 0], size: [W, topT, D] });
+    panels.push({ pos: [0, base + H - topT / 2, 0], size: [W, topT, D], role: "Tapa", edges: { front: true, back: true, left: true, right: true } });
     const lx = W / 2 - legD;
     const lz = D / 2 - legD;
     for (const sx of [-1, 1]) {
@@ -171,15 +175,15 @@ export function carcassPanels(f: Furniture): Panel[] {
 
   // Carcasa genérica: laterales, piso, techo, fondo, estantes y puertas.
   const innerW = Math.max(W - 2 * t, 0.02);
-  panels.push({ pos: [-(W / 2 - t / 2), base + H / 2, 0], size: [t, H, D] }); // lateral izq
-  panels.push({ pos: [W / 2 - t / 2, base + H / 2, 0], size: [t, H, D] }); // lateral der
-  panels.push({ pos: [0, base + t / 2, 0], size: [innerW, t, D] }); // piso
-  panels.push({ pos: [0, base + H - t / 2, 0], size: [innerW, t, D] }); // techo
-  panels.push({ pos: [0, base + H / 2, D / 2 - t / 2], size: [innerW, H - 2 * t, t] }); // fondo
+  panels.push({ pos: [-(W / 2 - t / 2), base + H / 2, 0], size: [t, H, D], role: "Lateral", edges: { front: true } }); // lateral izq
+  panels.push({ pos: [W / 2 - t / 2, base + H / 2, 0], size: [t, H, D], role: "Lateral", edges: { front: true } }); // lateral der
+  panels.push({ pos: [0, base + t / 2, 0], size: [innerW, t, D], role: "Piso", edges: { front: true } }); // piso
+  panels.push({ pos: [0, base + H - t / 2, 0], size: [innerW, t, D], role: "Techo", edges: { front: true } }); // techo
+  panels.push({ pos: [0, base + H / 2, D / 2 - t / 2], size: [innerW, H - 2 * t, t], role: "Fondo" }); // fondo
 
   for (let i = 1; i <= f.shelves; i++) {
     const sy = base + t + ((H - 2 * t) * i) / (f.shelves + 1);
-    panels.push({ pos: [0, sy, 0], size: [innerW, t, D - t] });
+    panels.push({ pos: [0, sy, 0], size: [innerW, t, D - t], role: "Estante", edges: { front: true } });
   }
 
   if (f.doors > 0) {
@@ -192,6 +196,8 @@ export function carcassPanels(f: Furniture): Panel[] {
         pos: [dx, base + H / 2, -(D / 2 - t / 2)],
         size: [doorW, doorH, t],
         door: true,
+        role: "Puerta",
+        edges: { front: true, back: true, left: true, right: true },
       });
     }
   }
@@ -307,11 +313,11 @@ export function buildCustomPanels(f: Furniture): Panel[] {
 
   // carcasa (caja). Se puede desactivar para hacer formas libres (ej. una escalera).
   if (f.carcass !== false) {
-    panels.push({ pos: [-(W / 2 - t / 2), base + H / 2, 0], size: [t, H, D] });
-    panels.push({ pos: [W / 2 - t / 2, base + H / 2, 0], size: [t, H, D] });
-    panels.push({ pos: [0, base + t / 2, 0], size: [inW, t, D] });
-    panels.push({ pos: [0, base + H - t / 2, 0], size: [inW, t, D] });
-    if (f.back !== false) panels.push({ pos: [0, base + H / 2, D / 2 - t / 2], size: [inW, H - 2 * t, t] });
+    panels.push({ pos: [-(W / 2 - t / 2), base + H / 2, 0], size: [t, H, D], role: "Lateral", edges: { front: true } });
+    panels.push({ pos: [W / 2 - t / 2, base + H / 2, 0], size: [t, H, D], role: "Lateral", edges: { front: true } });
+    panels.push({ pos: [0, base + t / 2, 0], size: [inW, t, D], role: "Piso", edges: { front: true } });
+    panels.push({ pos: [0, base + H - t / 2, 0], size: [inW, t, D], role: "Techo", edges: { front: true } });
+    if (f.back !== false) panels.push({ pos: [0, base + H / 2, D / 2 - t / 2], size: [inW, H - 2 * t, t], role: "Fondo" });
   }
 
   const cx = (x: number, w: number) => -W / 2 + x + w / 2;
@@ -339,10 +345,10 @@ export function buildCustomPanels(f: Furniture): Panel[] {
     const mat = c.materialId; // material propio del componente (textura/melamina)
     if (c.kind === "shelf") {
       const d = depthZ(c);
-      panels.push({ pos: [cx(c.x, c.w), base + c.y, d.zc], size: [c.w, t, d.zs], color: col, materialId: mat });
+      panels.push({ pos: [cx(c.x, c.w), base + c.y, d.zc], size: [c.w, t, d.zs], color: col, materialId: mat, role: "Estante", edges: { front: true } });
     } else if (c.kind === "divider") {
       const d = depthZ(c);
-      panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), d.zc], size: [Math.max(c.w, t), c.h, d.zs], color: col, materialId: mat });
+      panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), d.zc], size: [Math.max(c.w, t), c.h, d.zs], color: col, materialId: mat, role: "División", edges: { front: true } });
     } else if (c.kind === "rod") {
       panels.push({ pos: [cx(c.x, c.w), base + c.y, 0], size: [c.w, 0.03, 0.03], cylinder: true, color: col ?? "#9aa3ad" });
     } else if (c.kind === "board") {
@@ -358,13 +364,13 @@ export function buildCustomPanels(f: Furniture): Panel[] {
         else panels.push({ pos, size, shape: shp, color: col, materialId: mat });
       } else if (o === "front") {
         const inset = cl(c.depthInset ?? 0, 0, Math.max(0, D - t));
-        panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), frontZ + inset], size: [c.w, c.h, t], color: col, materialId: mat });
+        panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), frontZ + inset], size: [c.w, c.h, t], color: col, materialId: mat, role: "Placa", edges: { front: true, back: true, left: true, right: true } });
       } else if (o === "horizontal") {
         const d = depthZ(c);
-        panels.push({ pos: [cx(c.x, c.w), base + c.y + c.h / 2, d.zc], size: [c.w, t, d.zs], color: col, materialId: mat });
+        panels.push({ pos: [cx(c.x, c.w), base + c.y + c.h / 2, d.zc], size: [c.w, t, d.zs], color: col, materialId: mat, role: "Placa", edges: { front: true } });
       } else {
         const d = depthZ(c);
-        panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), d.zc], size: [t, c.h, d.zs], color: col, materialId: mat });
+        panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), d.zc], size: [t, c.h, d.zs], color: col, materialId: mat, role: "Placa", edges: { front: true } });
       }
     } else if (c.kind === "drawer") {
       const n = Math.max(1, c.count ?? 1);
@@ -379,11 +385,11 @@ export function buildCustomPanels(f: Furniture): Panel[] {
         const boxZc = fz + t / 2 + boxD / 2;
         const sideH = Math.max(each * 0.55, 0.05);
         const boxYc = fY - each / 2 + sideH / 2 + t;
-        panels.push({ pos: [bxc, fY, fz], size: [c.w - GAP, each - GAP, t], door: true, color: col, materialId: mat }); // frente
-        panels.push({ pos: [bxc, fY - each / 2 + t, boxZc], size: [c.w - 2 * t, t, boxD] }); // piso
-        panels.push({ pos: [bxc, boxYc, boxZc + boxD / 2 - t / 2], size: [c.w - 2 * t, sideH, t] }); // fondo cajón
-        panels.push({ pos: [bxc - c.w / 2 + t / 2, boxYc, boxZc], size: [t, sideH, boxD] }); // lado izq
-        panels.push({ pos: [bxc + c.w / 2 - t / 2, boxYc, boxZc], size: [t, sideH, boxD] }); // lado der
+        panels.push({ pos: [bxc, fY, fz], size: [c.w - GAP, each - GAP, t], door: true, color: col, materialId: mat, role: "Frente cajón", edges: { front: true, back: true, left: true, right: true } }); // frente
+        panels.push({ pos: [bxc, fY - each / 2 + t, boxZc], size: [c.w - 2 * t, t, boxD], role: "Piso cajón" }); // piso
+        panels.push({ pos: [bxc, boxYc, boxZc + boxD / 2 - t / 2], size: [c.w - 2 * t, sideH, t], role: "Contrafrente cajón" }); // fondo cajón
+        panels.push({ pos: [bxc - c.w / 2 + t / 2, boxYc, boxZc], size: [t, sideH, boxD], role: "Lateral cajón" }); // lado izq
+        panels.push({ pos: [bxc + c.w / 2 - t / 2, boxYc, boxZc], size: [t, sideH, boxD], role: "Lateral cajón" }); // lado der
       }
     } else if (c.kind === "doorHinged") {
       const hingeLeft = (c.hinge ?? "left") === "left";
@@ -397,6 +403,8 @@ export function buildCustomPanels(f: Furniture): Panel[] {
         materialId: mat,
         pivot: [pivotX, cyTop(c.y, c.h), frontZ],
         rotY: rot,
+        role: "Puerta",
+        edges: { front: true, back: true, left: true, right: true },
       });
     } else if (c.kind === "doorSliding") {
       // Hojas en 2 carriles bien separados. Cerradas: tilean el hueco con leve solape.
@@ -411,7 +419,7 @@ export function buildCustomPanels(f: Furniture): Panel[] {
         const z = frontZ - track * trackGap;
         const closedX = -W / 2 + c.x + i * seg + seg / 2;
         const x = closedX - open * i * seg;
-        panels.push({ pos: [x, cyTop(c.y, c.h), z], size: [leafW - GAP, c.h - GAP, t], door: true, color: col, materialId: mat });
+        panels.push({ pos: [x, cyTop(c.y, c.h), z], size: [leafW - GAP, c.h - GAP, t], door: true, color: col, materialId: mat, role: "Puerta corrediza", edges: { front: true, back: true, left: true, right: true } });
       }
     }
   }
