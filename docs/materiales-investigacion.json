@@ -1,0 +1,953 @@
+{
+  "summary": "Investigar y verificar fuentes CC0/gratis de materiales, texturas PBR, HDRIs y modelos para una app de diseño de muebles en Three.js, + cómo generar PBR desde una imagen",
+  "agentCount": 24,
+  "logs": [
+    "Research: 30 fuentes brutas, 26 únicas, verificando 16.",
+    "Nota: se truncó la verificación a 16 fuentes con uso comercial posible."
+  ],
+  "result": {
+    "topPicks": [
+      {
+        "name": "Poly Haven",
+        "url": "https://polyhaven.com",
+        "why": "CC0 1.0 puro, uso comercial sin atribución. Cubre todo el stack: texturas PBR de pared/piso/madera/melamina con sets completos (albedo+normal_gl+roughness+AO+displacement+ARM) hasta 8k, HDRIs de interior/estudio hasta 16k, y modelos de muebles en glTF/GLB. API pública documentada con MD5 y dependencias para mirrorear en build-time. Es la fuente primaria recomendada.",
+        "bestFor": "HDRIs de interior, modelos glTF de muebles, y texturas PBR de alta calidad con ARM map",
+        "license": "CC0 1.0 Universal (confirmada en polyhaven.com/license)"
+      },
+      {
+        "name": "ambientCG",
+        "url": "https://ambientcg.com/",
+        "why": "CC0 1.0 confirmado por API en vivo. La mayor librería CC0 de surfaces PBR seamless (1K-8K): maderas/woodgrain tipo melamina, concreto/yeso lacado, ladrillo, telas, mármol y metales para contexto. API REST abierta sin key (v2/v3). Caveat: infra de un solo mantenedor, por eso conviene cachear local y no depender en runtime.",
+        "bestFor": "Texturas PBR de paredes, pisos, maderas y melamina seamless en volumen",
+        "license": "CC0 1.0 Universal (confirmada en docs.ambientcg.com/license)"
+      },
+      {
+        "name": "3dtextures.me",
+        "url": "https://3dtextures.me/about/",
+        "why": "CC0 1.0 confirmado. Categorías dedicadas de madera, laminado, fabric, mármol/piedra, plástico y metal, todas seamless y PBR-completas (base color, normal, roughness, AO, height). SBSAR procedural re-exportable a mayor resolución. Descarga libre sin cuenta, ideal como complemento de variedad de acabados de melamina/maderas.",
+        "bestFor": "Variedad de acabados de madera/laminado/melamina y materiales SBSAR re-escalables",
+        "license": "CC0 1.0 (confirmada en 3dtextures.me/about)"
+      },
+      {
+        "name": "ShareTextures",
+        "url": "https://www.sharetextures.com/p/license",
+        "why": "Uso comercial sin atribución y buena librería de madera/fabric/cuero/piedra/metal y modelos de muebles. CAVEAT de licencia: prohíbe redistribución de los archivos fuente, descargas automatizadas y hot-linking/embeber descargas en apps de terceros. Usable para el render resultante, pero NO bundlear los source files en la app distribuida. Por eso queda como complemento manual detrás de las tres CC0 puras.",
+        "bestFor": "Modelos de muebles y acabados extra de cuero/fabric, usados en render (sin redistribuir el archivo fuente)",
+        "license": "CC0 con restricciones añadidas (no redistribución/no automatización; confirmada en sharetextures.com/p/license)"
+      }
+    ],
+    "markdown": "# Fuentes PBR + estrategia imagen->material para `renderre` (Next.js 15 + react-three-fiber)\n\nContexto del proyecto verificado: `renderre` es un scaffold Next.js 15 (`app` router, `type: module`), con `three@0.171`, `@react-three/fiber@9`, `@react-three/drei@10` y `zustand@5`. Todavía no hay archivos fuente, así que el código de abajo es directamente el que conviene crear. Constantes confirmadas en runtime contra esta instalación: `THREE.SRGBColorSpace === 'srgb'`, `THREE.NoColorSpace === ''`, `THREE.RepeatWrapping === 1000`. Helpers de drei confirmados disponibles: `useTexture`, `useGLTF`, `Environment`, `useEnvironment`, `Stage`, `Bounds`, `Center`.\n\n---\n\n## 1. Resumen de licencias (lo que importa para shippear comercial)\n\n| Fuente | Licencia real | Comercial | Atribución | ¿Puedo **bundlear** los archivos en mi app? | Acceso programático |\n|---|---|---|---|---|---|\n| **Poly Haven** | CC0 1.0 | Sí | No (apreciada) | **Sí** | API pública `api.polyhaven.com` + CDN. Requiere `User-Agent` propio. Nota: el *uso comercial de la API en runtime* pide licencia/sponsorship aparte — pero los **archivos descargados siguen CC0**. Por eso: descargar/mirrorear, no hot-linkear. |\n| **ambientCG** | CC0 1.0 | Sí | No | **Sí** | API abierta sin key (`/api/v2/full_json`, `/api/v3/assets`). Infra de un solo mantenedor → **cachear local**, no depender en runtime. |\n| **3dtextures.me** | CC0 1.0 | Sí | No | **Sí** | Descarga web, sin cuenta. Sets ~2K (SBSAR re-exportable a más). |\n| **ShareTextures** | CC0 con restricciones añadidas | Sí | No | **El render sí; los archivos fuente NO redistribuir** | Prohíbe descargas automatizadas, hot-linking y embeber descargas directas en apps de terceros. Login requerido. **No bundlear los source files** ni pegar su API; usá el render resultante. |\n\n**Regla operativa para una app comercial:** construí una **librería de materiales propia, curada y mirroreada localmente** (en `/public/materials/...` o en tu propio bucket/CDN). Para CC0 puro (Poly Haven, ambientCG, 3dtextures) esto es 100% válido y además te saca la dependencia de infra de terceros en runtime. De ShareTextures usá assets solo si no vas a redistribuir el archivo fuente; lo más limpio es priorizar las tres CC0 puras y dejar ShareTextures como complemento manual.\n\n**Caveats CC0 a registrar:** CC0 no renuncia a derechos de marca/trademark ni de publicidad. Si una textura/HDRI muestra un logo o un lugar reconocible, ese sujeto puede tener restricciones propias aunque el archivo sea CC0. Para texturas de pared/piso/madera/melamina esto casi nunca aplica; revisalo en HDRIs de interiores con marcas visibles.\n\n---\n\n## 2. Pipeline de adquisición recomendado (build-time, no runtime)\n\nNo descargues desde el cliente ni en runtime. Hacé un script de ingest que corra en tu máquina/CI:\n\n```ts\n// scripts/fetch-polyhaven.ts  (Node, corre offline en build/CI)\n// ambientCG: mismo patrón contra https://ambientcg.com/api/v2/full_json?id=...\nconst HEADERS = { \"User-Agent\": \"renderre/1.0 (dev@selenesoluciones.com)\" }; // Poly Haven exige UA propio\n\nasync function fetchTexture(id: string) {\n  const files = await fetch(`https://api.polyhaven.com/files/${id}`, { headers: HEADERS }).then(r => r.json());\n  // files.Diffuse[\"2k\"].jpg.url, files.nor_gl[\"2k\"].exr.url, files.Rough[...], files.AO[...], files.Displacement[...]\n  // descargar a /public/materials/<id>/{albedo,normal,roughness,ao,displacement}.<ext>\n}\n```\n\nConvención de carpeta por material (lo que el loader del cliente espera):\n\n```\n/public/materials/<id>/\n  albedo.jpg        # color, sRGB\n  normal.jpg        # nor_gl (OpenGL), data\n  roughness.jpg     # data (canal único)\n  ao.jpg            # data\n  displacement.jpg  # opcional\n  arm.jpg           # opcional: AO(R) + Roughness(G) + Metalness(B) packed (Poly Haven lo provee)\n  meta.json         # { source, license:\"CC0-1.0\", physicalSizeMeters:[w,h], id }\n```\n\nPoly Haven y ambientCG dan un **ARM map** (AO+Rough+Metal empacado en RGB) — usarlo baja 3 fetches a 1 (ver §4 channel packing). Importante: **OpenGL normal (`nor_gl`)**, no DirectX, porque three.js/WebGL usa convención OpenGL (Y+ hacia arriba). Si solo tenés `nor_dx`, invertí el canal verde.\n\n---\n\n## 3. Cargar texturas en react-three-fiber\n\n### 3.1 Material PBR completo con `useTexture` (declarativo, lo recomendado)\n\n```tsx\n// components/PbrMaterial.tsx\n\"use client\";\nimport * as THREE from \"three\";\nimport { useTexture } from \"@react-three/drei\";\nimport { useMemo } from \"react\";\n\ntype Props = {\n  id: string;                         // carpeta en /public/materials/<id>\n  repeat?: [number, number];          // tiling\n  normalScale?: number;\n  envMapIntensity?: number;\n};\n\nexport function PbrMaterial({ id, repeat = [1, 1], normalScale = 1, envMapIntensity = 1 }: Props) {\n  const base = `/materials/${id}`;\n  const maps = useTexture({\n    map: `${base}/albedo.jpg`,\n    normalMap: `${base}/normal.jpg`,\n    roughnessMap: `${base}/roughness.jpg`,\n    aoMap: `${base}/ao.jpg`,\n  });\n\n  useMemo(() => {\n    // colorSpace: SOLO el albedo es color; el resto es DATA\n    maps.map.colorSpace = THREE.SRGBColorSpace;\n    maps.normalMap.colorSpace = THREE.NoColorSpace;\n    maps.roughnessMap.colorSpace = THREE.NoColorSpace;\n    maps.aoMap.colorSpace = THREE.NoColorSpace;\n\n    for (const t of Object.values(maps)) {\n      t.wrapS = t.wrapT = THREE.RepeatWrapping;\n      t.repeat.set(repeat[0], repeat[1]);\n      t.anisotropy = 8;          // nitidez en ángulos rasantes (pisos/encimeras)\n      t.needsUpdate = true;\n    }\n  }, [maps, repeat]);\n\n  return (\n    <meshStandardMaterial\n      map={maps.map}\n      normalMap={maps.normalMap}\n      normalScale={new THREE.Vector2(normalScale, normalScale)}\n      roughnessMap={maps.roughnessMap}\n      aoMap={maps.aoMap}\n      envMapIntensity={envMapIntensity}\n    />\n  );\n}\n```\n\nQué mapa va en qué slot de `MeshStandardMaterial` (modelo metallic/roughness, que es el de three):\n\n| Slot | Mapa | colorSpace | Notas |\n|---|---|---|---|\n| `map` | Albedo / Base Color | **SRGBColorSpace** | Único mapa \"de color\" |\n| `normalMap` | Normal **OpenGL** | NoColorSpace | `normalScale` controla intensidad |\n| `roughnessMap` | Roughness | NoColorSpace | Multiplica con `material.roughness` (dejar `roughness=1` si usás mapa) |\n| `metalnessMap` | Metalness | NoColorSpace | Casi siempre **no** lo querés en muebles (ver §6) |\n| `aoMap` | Ambient Occlusion | NoColorSpace | **Requiere `uv2`** en geometría no-drei; ver §5 |\n| `displacementMap` | Height | NoColorSpace | Caro (necesita teselado). Preferí normal+parallax salvo render hero |\n| `bumpMap` | Height (alt.) | NoColorSpace | Alternativa barata a displacement |\n\n`aoMap` y `lightMap` en three usan el **segundo set de UV (`uv2`)**. Para `<planeGeometry>`/`<boxGeometry>` de drei/three modernos el AO funciona con `uv` si no hay `uv2`, pero para mallas importadas asegurá `geometry.setAttribute('uv2', geometry.attributes.uv)`.\n\n### 3.2 Imperativo (cuando generás texturas en runtime desde imagen del usuario)\n\n```ts\nimport * as THREE from \"three\";\nconst loader = new THREE.TextureLoader();\nconst albedo = await loader.loadAsync(url);\nalbedo.colorSpace = THREE.SRGBColorSpace;\nalbedo.wrapS = albedo.wrapT = THREE.RepeatWrapping;\n```\n\n---\n\n## 4. Tiling / `repeat` para muebles (escala física, no \"veces\")\n\nEl error típico es pensar `repeat` en \"cuántas veces se repite\". Para muebles pensalo en **metros reales** para que un mismo material se vea consistente en un panel chico y en uno grande.\n\nCada material debe guardar su **tamaño físico** (`physicalSizeMeters`, ej. un set de melamina puede representar 1.0 m × 1.0 m). Entonces:\n\n```ts\n// repeat = (dimensión del panel en metros) / (tamaño físico de la textura en metros)\nfunction repeatFor(panelMeters: [number, number], texMeters: [number, number]): [number, number] {\n  return [panelMeters[0] / texMeters[0], panelMeters[1] / texMeters[1]];\n}\n// panel de 0.6 x 1.8 m con textura de 1x1 m  ->  repeat [0.6, 1.8]\n```\n\nReglas:\n- **Mismo `repeat` para todos los mapas** del material (albedo/normal/rough/ao) o se desincronizan.\n- Para tapas/laterales de un mueble con UVs distintas, mantené el material por-cara pero recomputá `repeat` por la dimensión de esa cara → la veta de la madera mantiene escala física en todo el mueble.\n- Para que el tiling no rompa en bordes, los sets CC0 de estas fuentes son **seamless**; mantené `RepeatWrapping` (no `ClampToEdgeWrapping`).\n- Si querés rotar la veta (vetas verticales vs horizontales) usá `texture.rotation = Math.PI/2` con `texture.center.set(0.5,0.5)`.\n\n---\n\n## 5. Iluminación con HDRIs de interior (Poly Haven / ambientCG)\n\n```tsx\nimport { Environment, Stage } from \"@react-three/drei\";\n\n// Opción A: control fino. Mirroreá el .hdr a /public/hdris/<id>.hdr\n<Environment files=\"/hdris/studio_small_09_2k.hdr\" background={false} />\n\n// Opción B: producto/preview rápido con encuadre y piso automático\n<Stage environment={null} adjustCamera intensity={0.6}>\n  <YourFurniture />\n</Stage>\n```\n\n- Para **render de producto** de muebles, un HDRI de **estudio/interior** de Poly Haven a **2k es suficiente** como IBL (`background={false}` para fondo neutro propio). 4k+ solo si lo mostrás como fondo.\n- Bajá `.hdr` (no `.exr` de 16k) para la versión IBL: menos memoria, carga más rápida en navegador.\n- `envMapIntensity` en el material (§3.1) ajusta cuánto refleja cada superficie — bajalo para melamina mate, subilo para lacas/vidrio.\n- Atribución: ninguna de las HDRI sources CC0 la exige.\n\n---\n\n## 6. Metalness en muebles: escalar, no mapa\n\nPara MDF/melamina/madera el material **no es metálico**: dejá `metalness={0}` como escalar global y **no generes `metalnessMap`**. Solo herrajes/patas metálicas justifican `metalness=1` (idealmente como material separado, no como mapa inferido de una foto). Esto evita los artefactos del metallic-workflow cuando el mapa está mal inferido.\n\n---\n\n## 7. Estrategia \"el usuario sube una imagen -> material PBR\" (en el navegador)\n\nBasado en las técnicas provistas. El **único mapa \"real\" es el albedo** (la foto); el resto son derivaciones heurísticas editables. Por eso la UX debe exponer sliders, no prometer física exacta.\n\n### Flujo recomendado\n\n1. **Carga + decode**: `<input type=\"file\">` -> `createImageBitmap(file)`. Dibujar en un `<canvas>`/`OffscreenCanvas` para tener `ImageData`.\n2. **Albedo**: usar la imagen tal cual como `map`. `colorSpace = SRGBColorSpace`, `RepeatWrapping`. (Opcional) **delight básico**: restar la luminancia de baja frecuencia (blur grande) para atenuar sombras horneadas, así el material no trae iluminación quemada. Un delight perfecto necesita ML; el de baja frecuencia es suficiente para empezar.\n3. **Normal map** desde la luminancia tratada como heightmap, con **Sobel/Scharr**: `Gx`,`Gy` por convolución; `n = normalize(vec3(-Gx*strength, -Gy*strength, 1))`; codificar `n*0.5+0.5` a RGB. `colorSpace = NoColorSpace`. Exponer `strength` (mapearlo a `normalScale`). Un leve blur previo reduce ruido. **Hacerlo en un fragment shader / `WebGLRenderTarget`** es mucho más rápido que `getImageData` en CPU; referencia de código client-side reutilizable: `cpetry/NormalMap-Online` (MIT).\n4. **Roughness** aproximada: `roughness = 1 - normalize(luminance)` con gamma/contraste, o un high-pass como proxy de microrrelieve. `colorSpace = NoColorSpace`. **Exponer min/max/contraste e invert** porque el signo correcto depende de la imagen.\n5. **Metalness**: **slider global**, default `0`. No generar mapa (ver §6).\n6. **AO**: opcional, derivable de cavidades del heightmap (oscurecer valles). Bajo impacto; se puede omitir en v1.\n\n### Por qué shader > CPU\n\nSobel sobre `ImageData` en CPU para una textura 2k son ~4M iteraciones por mapa y bloquea el main thread. Pasá la imagen como textura a un fragment shader que muestrea los 8 vecinos, renderizá a un `WebGLRenderTarget`, y leé el resultado (o usalo directo como textura del material). Para el tiling, el muestreo de vecinos debe usar wrap para no romper los bordes seamless.\n\n### Esqueleto de generación en GPU\n\n```ts\n// generateNormal.ts — render-to-texture con three (GPU)\nimport * as THREE from \"three\";\n\nconst NORMAL_FRAG = /* glsl */ `\n  uniform sampler2D uTex; uniform vec2 uTexel; uniform float uStrength;\n  varying vec2 vUv;\n  float lum(vec3 c){ return dot(c, vec3(0.299,0.587,0.114)); }\n  void main(){\n    float l  = lum(texture2D(uTex, vUv).rgb);\n    float r  = lum(texture2D(uTex, vUv + vec2(uTexel.x,0.)).rgb);\n    float u  = lum(texture2D(uTex, vUv + vec2(0.,uTexel.y)).rgb);\n    float dx = (r - l) * uStrength;\n    float dy = (u - l) * uStrength;\n    vec3 n = normalize(vec3(-dx, -dy, 1.0));\n    gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);\n  }`;\n\nexport function generateNormalMap(renderer: THREE.WebGLRenderer, source: THREE.Texture, w: number, h: number, strength = 2) {\n  const rt = new THREE.WebGLRenderTarget(w, h, { colorSpace: THREE.NoColorSpace });\n  const scene = new THREE.Scene();\n  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);\n  const mat = new THREE.ShaderMaterial({\n    uniforms: {\n      uTex: { value: source },\n      uTexel: { value: new THREE.Vector2(1 / w, 1 / h) },\n      uStrength: { value: strength },\n    },\n    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy,0.,1.); }`,\n    fragmentShader: NORMAL_FRAG,\n  });\n  scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));\n  renderer.setRenderTarget(rt);\n  renderer.render(scene, cam);\n  renderer.setRenderTarget(null);\n  return rt.texture; // usable directo como normalMap (NoColorSpace)\n}\n```\n\n> Producción: usá Scharr (mejor preservación de detalle que el Sobel de 3 taps de arriba), muestreá los 8 vecinos, y aplicá el blur previo. En R3F obtené el `renderer` con `useThree(s => s.gl)`. Calidad esperada: buena en superficies donde el brillo corresponde al relieve (piedra, tela, corteza, vetas de madera); falla donde el color no es altura (una mancha oscura plana genera un falso surco), por eso `strength` editable es clave.\n\n---\n\n## 8. Modelos de muebles glTF (props de escena)\n\n```tsx\nimport { useGLTF, Center, Bounds } from \"@react-three/drei\";\nfunction Chair() {\n  const { scene } = useGLTF(\"/models/green_chair_01.glb\"); // Poly Haven CC0\n  return <primitive object={scene} />;\n}\nuseGLTF.preload(\"/models/green_chair_01.glb\");\n```\n\n- **Poly Haven** y **ambientCG** dan modelos en glTF/GLB CC0 — ideales como props (sillas, plantas) alrededor del mueble configurado. Mirroreá el `.glb` a `/public/models/`.\n- Para batch de modelos, comprimí con **Draco/Meshopt** (el proyecto ya tiene `@types/draco3d`); drei `useGLTF` soporta el decoder Draco.\n- Encuadrá con `<Bounds fit clip observe>` + `<Center>` para que cualquier modelo entre en cámara sin ajuste manual.\n\n---\n\n## 9. Checklist de integración para `renderre`\n\n- [ ] Script `scripts/ingest.ts` (Node) que baje CC0 desde Poly Haven/ambientCG con `User-Agent` propio a `/public/materials/<id>/` + `meta.json` con `physicalSizeMeters` y `license`.\n- [ ] `components/PbrMaterial.tsx` (§3.1) con colorSpaces correctos y `repeat` por escala física (§4).\n- [ ] HDRIs de estudio/interior 2k `.hdr` en `/public/hdris/`, montados con `<Environment background={false}>` (§5).\n- [ ] `metalness` escalar global (§6); herrajes como material aparte.\n- [ ] Módulo imagen->PBR en GPU (`generateNormalMap` + roughness por luminancia) con sliders `strength`, roughness min/max/contraste/invert (§7).\n- [ ] No bundlear archivos fuente de ShareTextures; priorizar las tres CC0 puras.\n- [ ] Pantalla \"Acerca de / Licencias\" listando fuentes CC0 (no obligatorio, pero buena práctica y la disclosure que Poly Haven aprecia).\n\nArchivos sugeridos a crear (rutas absolutas en este repo):\n- `C:\\Users\\juany\\OneDrive\\Documentos\\GitHub\\selene\\pyrion-enterprise\\renderre\\components\\PbrMaterial.tsx`\n- `C:\\Users\\juany\\OneDrive\\Documentos\\GitHub\\selene\\pyrion-enterprise\\renderre\\lib\\generateNormal.ts`\n- `C:\\Users\\juany\\OneDrive\\Documentos\\GitHub\\selene\\pyrion-enterprise\\renderre\\scripts\\ingest.ts`\n- `C:\\Users\\juany\\OneDrive\\Documentos\\GitHub\\selene\\pyrion-enterprise\\renderre\\public\\materials\\` (mirror CC0)\n",
+    "allSources": [
+      {
+        "name": "Poly Haven",
+        "url": "https://polyhaven.com",
+        "license": "CC0 1.0 (Creative Commons Zero / Public Domain Dedication). All downloadable assets (HDRIs, textures, 3D models) are CC0 - effectively public domain even in jurisdictions without a public-domain concept. The only restriction is you cannot claim to be the original author or re-license the assets. Website-only content (logos, thumbnails, metadata, user renders) is NOT CC0 and remains protected.",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "HDRIs",
+          "Textures (PBR)",
+          "3D Models"
+        ],
+        "formats": [
+          "EXR",
+          "HDR",
+          "PNG",
+          "JPG",
+          "blend (Blender)",
+          "FBX",
+          "glTF/GLB",
+          "USD",
+          "MTLX (MaterialX)"
+        ],
+        "mapsProvided": [
+          "Diffuse/Albedo",
+          "Normal OpenGL (nor_gl)",
+          "Normal DirectX (nor_dx)",
+          "Roughness (Rough)",
+          "Ambient Occlusion (AO)",
+          "Displacement",
+          "ARM packed (AO+Roughness+Metallic)",
+          "Metalness (metallic assets)"
+        ],
+        "relevanceToMdfFurniture": "High. Provides CC0 wood, laminate/melamine, fabric and metal PBR textures (full albedo+normal+roughness+AO+displacement+ARM map sets, up to 8k) ideal for texturing MDF furniture surfaces and edges; HDRIs for realistic interior/studio lighting of product renders; and some 3D furniture models (e.g. chairs) usable as scene props. All royalty-free, no attribution required, full commercial use.",
+        "accessNotes": "Browse/download free via web UI (polyhaven.com/all). Programmatic/batch download via documented public REST API + CDN. API requires a unique User-Agent header (your app name) or requests will eventually be blocked. Official Blender add-on and asset browser also available.",
+        "notes": "ATTRIBUTION: not required but appreciated. ORIGIN: all assets are original work of Poly Haven staff or artists who donate/sell directly; explicitly no generative AI used. RESOLUTIONS - Textures: 1k/2k/4k/8k (min 8k source); HDRIs: 1k/2k/4k/8k/16k (some up to 24k, 16k+ source); 3D-model textures: 1k/2k/4k. API/CDN: public REST API at https://api.polyhaven.com (OpenAPI 3.0 documented), CDN at cdn.polyhaven.com. Endpoints: /types, /assets (list+metadata, filter t=hdris|textures|models), /info/{id}, /files/{id} (per-resolution/per-format download URLs, file sizes, MD5 hashes, and dependency lists for blend/gltf/usd). API USAGE TERMS: free for non-commercial projects and academic research; commercial use OF THE API ITSELF needs a custom license/sponsorship (contact Poly Haven) - but this is separate from the CC0 asset license: downloaded asset files remain CC0 and commercially usable regardless. VERIFIED at https://polyhaven.com/license, https://docs.polyhaven.com/en/faq, https://polyhaven.com/our-api, https://github.com/Poly-Haven/Public-API, and live endpoints /files/brick_wall_02 (texture), /files/kloofendal_48d_partly_cloudy_puresky (HDRI), /files/GreenChair_01 (model).",
+        "verified": {
+          "name": "Poly Haven",
+          "confirmed": true,
+          "commercialUseOk": "yes",
+          "attributionRequired": "no",
+          "actualLicense": "CC0 1.0 Universal (Creative Commons Zero / Public Domain Dedication)",
+          "correction": "Claim confirmed against official sources, no material correction needed. Nuances to keep on record: (1) CC0 1.0 does NOT waive third-party patent, trademark, or publicity/privacy rights (per the Creative Commons CC0 deed). Poly Haven's own FAQ warns some assets depict real-world locations/objects, so a depicted branded/recognizable subject could carry independent restrictions even though the asset file itself is CC0. (2) The 'no claiming authorship / no re-licensing' point is best understood as ethical guidance + protection against fraud, not an extra legal restriction on use. Poly Haven also requests (does not require) that resellers disclose the assets are free and link back. (3) Only the downloadable assets (HDRIs, textures, 3D models) are CC0; website content (logos, thumbnails, metadata, user renders) is NOT CC0 and remains protected. (4) polyhaven.com/corporate explicitly states the paid corporate/API/snapshot offerings are optional and that 'most teams can use our assets without contacting us' with no cost or registration — so a commercial design app does not need any paid license."
+        }
+      },
+      {
+        "name": "ambientCG (ambientcg.com)",
+        "url": "https://ambientcg.com/",
+        "license": "Creative Commons CC0 1.0 Universal (public domain dedication). Verified at https://docs.ambientcg.com/license/ — quote: \"You can copy, modify, distribute and perform the assets, even for commercial purposes, all without asking permission.\"",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "PBR Surfaces (materials/textures): bricks, wood, concrete, plaster, tiles, metal, fabric, stone, marble, terrazzo, ground, etc.",
+          "Atlases",
+          "Decals",
+          "HDRIs (environment/IBL lighting)",
+          "Substances (procedural .sbsar)",
+          "3D Assets / models",
+          "Terrain",
+          "Brushes"
+        ],
+        "formats": [
+          "ZIP (all material downloads are packaged as .zip)",
+          "JPG (compressed textures, inside zip)",
+          "PNG (lossless textures, inside zip)",
+          "EXR (for HDRIs / high-bit-depth)",
+          "SBSAR (Substance procedural assets)",
+          "USD/USDZ-compatible PBR map sets noted on material pages",
+          "v3 API also exposes per-file metadata for individual maps"
+        ],
+        "mapsProvided": [
+          "Color / Albedo",
+          "Normal (OpenGL/GL normal map)",
+          "Roughness",
+          "Displacement / Height",
+          "Ambient Occlusion (AO)",
+          "Metalness (on metal/PBR-metallic materials)",
+          "Opacity (on materials that need it)"
+        ],
+        "relevanceToMdfFurniture": "Highly relevant. ambientCG carries the exact surface families needed to texture MDF furniture and interior/architectural scenes: melamine/laminate-like wood and woodgrain finishes, painted/lacquered plaster and concrete surfaces, plus fabrics, metals, marble and tile for surrounding context. CC0 + free commercial use means textures can be shipped inside a commercial product (e.g. a furniture configurator/renderer) with zero attribution or licensing cost. The seamless/tileable PBR sets at 1K-8K are well suited to real-time and offline arch-viz rendering of furniture panels.",
+        "notes": "Verified live (2026-06-27) against the official site and docs, plus a real API call.\n\nLicense: CC0 1.0 Universal. Commercial use allowed, NO attribution required (credit appreciated but optional), redistribution/reselling permitted (the site was founded specifically to allow free texture redistribution). The license page does not explicitly address AI/ML training, but CC0 places the work in the public domain with no use restrictions.\n\nResolutions: materials offered in 1K, 2K, 4K and 8K tiers (HDRIs typically up to higher EXR resolutions). PBR maps confirmed via live API call on a sample material (Bricks090): Color, Normal, Roughness, Displacement, Ambient Occlusion (Metalness/Opacity appear on materials that require them).\n\nAccess methods:\n1) Direct download — per-asset ZIPs from each material's /view page (e.g. https://ambientcg.com/view?id=Bricks090); zip names encode resolution + format e.g. 1K-JPG, 4K-PNG, 8K-PNG.\n2) Open REST API — NO API key / authentication required (publicly accessible). Endpoints:\n   - v2: https://ambientcg.com/api/v2/full_json  (rich JSON, params: type, q, method, sort, limit[1-250], offset, id, include=downloadData,imageData,previewData,...). Verified returning valid JSON without a key for ?id=Bricks090.\n   - v2/v1: https://ambientcg.com/api/v1/downloads_csv  (CSV list of downloadable files for bulk scripting).\n   - v3 (latest): https://ambientcg.com/api/v3/assets  (assets, plus /categories, /collections, /rss). v1 is frozen (no updates) — docs recommend v2 or v3 for new projects.\n   - Download links: 'downloadLink' (recommended, logs the download stat then HTTP-redirects to the raw file) vs 'rawLink' (direct file URL).\n3) Bulk/zip: every download is delivered as a .zip per resolution+format; there is also an AssetFetch endpoint and an official Blender 'AmbientCG Material Importer' add-on for in-app fetching.\n\nReliability caveat (stated by the maintainer): the site/API is run and funded by one person, 'built with hobbyists and educators in mind,' and is 'potentially not as reliable or stable as needed for an enterprise-level application.' Plan for caching/mirroring assets locally rather than hot-linking the API at runtime in an enterprise product.\n\nScale: 1,000,000+ monthly downloads; one of the largest free CC0 PBR libraries.",
+        "accessNotes": "No login, no API key, no rate-limit documented (treat the single-maintainer infra as best-effort; cache assets locally). HTTP is upgraded to HTTPS. Parameters mirror the on-site filter UI at ambientcg.com/list — configure a search there and copy the query params into the API call.",
+        "verified": {
+          "name": "ambientCG (ambientcg.com)",
+          "confirmed": true,
+          "commercialUseOk": "yes",
+          "attributionRequired": "no",
+          "actualLicense": "Creative Commons CC0 1.0 Universal (public domain dedication)",
+          "correction": ""
+        }
+      },
+      {
+        "name": "3dtextures.me",
+        "url": "https://3dtextures.me/about/",
+        "license": "CC0 1.0 (Creative Commons Zero / public domain dedication)",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "Seamless tileable PBR materials",
+          "Substance SBS/SBSAR procedural materials"
+        ],
+        "formats": [
+          "PNG",
+          "SBS",
+          "SBSAR"
+        ],
+        "mapsProvided": [
+          "Base Color / Albedo",
+          "Normal",
+          "Roughness",
+          "Ambient Occlusion",
+          "Height/Displacement",
+          "Metallic (where applicable)"
+        ],
+        "relevanceToMdfFurniture": "High. Has dedicated wood, laminate, fabric, marble/stone, plastic and metal categories useful for MDF/melamine furniture, countertops and upholstery. Seamless and PBR-complete, ready for Three.js/Blender/Unreal.",
+        "accessNotes": "Free, no account required for direct downloads. Most sets at up to 2K; procedural SBSAR can be re-exported at higher resolution.",
+        "notes": "Official license page (3dtextures.me/about) confirms CC0: 'You can use the textures for any purpose, including commercial. You do not need to give credit or attribution when using them (although it is appreciated).' Only restriction: you cannot claim authorship. Map/format list reflects this site's standard PBR set delivery; verify per-texture on its download page. Run by Joao Paulo (Katsukagi).",
+        "verified": {
+          "name": "3dtextures.me",
+          "confirmed": true,
+          "commercialUseOk": "yes",
+          "attributionRequired": "no",
+          "actualLicense": "CC0 1.0 (Creative Commons Zero / public domain dedication)",
+          "correction": ""
+        }
+      },
+      {
+        "name": "ShareTextures",
+        "url": "https://www.sharetextures.com/p/license",
+        "license": "Custom CC0-based license (copyright-free, with usage restrictions added)",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "PBR textures/materials",
+          "3D models",
+          "HDRIs"
+        ],
+        "formats": [
+          "PNG",
+          "JPG",
+          "Substance SBSAR (varies by asset)"
+        ],
+        "mapsProvided": [
+          "Base Color / Diffuse",
+          "Normal",
+          "Roughness",
+          "Ambient Occlusion",
+          "Height",
+          "Metallic (where applicable)"
+        ],
+        "relevanceToMdfFurniture": "High. Strong wood, fabric, leather, stone and metal libraries plus furniture 3D models — directly usable for interiors and MDF/upholstered furniture scenes.",
+        "accessNotes": "Free assets up to 4K. Account/login generally required to download; Pro tier exists for extras but core CC0 assets are free.",
+        "notes": "Official license (sharetextures.com/p/license): 'Free to use for personal, educational, or commercial projects. No attribution required (but appreciated!).' Important restrictions beyond plain CC0: NO redistribution on other sites/plugins/collections without written permission; NO automated downloads, hotlinking, or embedding direct downloads in third-party apps; no use in hateful/violent/illegal content. CC0 applies ONLY to assets downloaded directly from their site. These restrictions matter if you plan to bundle textures into a distributed app — using them inside rendered output is fine, redistributing the source files is not.",
+        "verified": {
+          "name": "ShareTextures",
+          "confirmed": true,
+          "commercialUseOk": "yes",
+          "attributionRequired": "no",
+          "actualLicense": "Custom CC0-based license (copyright-free, with added usage restrictions)",
+          "correction": "Verificado en la fuente oficial (https://www.sharetextures.com/p/license). Las tres afirmaciones se confirman textualmente: \"Free to use for personal, educational, or commercial projects\" (uso comercial = sí) y \"No attribution required (but appreciated!)\" (atribución = no). El nombre correcto es \"Custom CC0-based license\", no CC0 puro. CAVEAT CRÍTICO para una app comercial de diseño: la licencia NO es CC0 estándar e impone restricciones de redistribución. Cita textual: \"No asset redistribution on other websites, in plugins, or as part of collections without our written permission\" y \"No automated downloads, hotlinking, or embedding direct downloads in third-party apps\". Distinción clave: usar las texturas DENTRO de diseños/productos finales que vendés está permitido comercialmente; pero EMPAQUETAR los archivos de asset crudos dentro de tu app/SaaS de diseño para que los usuarios finales los seleccionen y coloquen probablemente cuenta como \"redistribution\"/\"embedding in third-party apps\" y requiere permiso escrito de ShareTextures. Además, la licencia CC0 solo aplica a assets descargados directamente de su sitio. Recomendación: usable en proyectos comerciales en general; para integrarla como librería de assets embebida en una app comercial de diseño, contactar a ShareTextures para permiso escrito antes de redistribuir los archivos."
+        }
+      },
+      {
+        "name": "FreePBR.com",
+        "url": "https://freepbr.com/about-free-pbr/",
+        "license": "Custom proprietary license (NOT CC0) — free for non-commercial use; commercial use requires a paid 'VIP' membership (~$16); no redistribution of the source files",
+        "commercialUse": "unclear",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "Seamless PBR materials"
+        ],
+        "formats": [
+          "PNG (2048x2048)",
+          "Unity-ready PSD with metallic/smoothness when applicable"
+        ],
+        "mapsProvided": [
+          "Albedo",
+          "Normal",
+          "Roughness",
+          "Metallic",
+          "Ambient Occlusion",
+          "Height (sometimes)"
+        ],
+        "relevanceToMdfFurniture": "Medium-High. Good wood, metal, fabric and stone PBR sets relevant to furniture/interiors, but the licensing is the catch.",
+        "accessNotes": "Free downloads available; commercial use is gated behind a one-time paid membership per the site's own terms.",
+        "notes": "IMPORTANT — this is the weak link of the list and is NOT CC0. The site states free downloads are 'as long as you don't use these commercially' and asks for a $16 payment for commercial/VIP access. It also explicitly prohibits redistribution of the source PBR sets ('don't redistribute these PBR file sets on other sites, file sharing sites, email... Let's keep the source files on freepbr.com only'). For a commercial Selene/Renderre product, treat FreePBR.com as paid-license, not free CC0. commercialUse marked 'unclear' because it is conditionally allowed only after payment.",
+        "verified": {
+          "name": "FreePBR.com",
+          "confirmed": true,
+          "commercialUseOk": "unclear",
+          "attributionRequired": "no",
+          "actualLicense": "Custom proprietary license (NOT CC0). Free downloads are licensed for non-commercial use only; commercial use requires a one-time ~$16 'VIP' membership/mega-pack purchase. Redistribution of the source file sets is prohibited. No attribution required.",
+          "correction": "Asserted license is accurate and confirmed against official sources. Refinement: commercial use is NOT available on the free tier at all — the free individual downloads are explicitly non-commercial ('It's all free. As long as you don't use these commercially'). Commercial rights only attach to the paid ~$16 VIP pack ('Use as many of the textures you like commercially... for your paid work'). Therefore for a commercial design app the free assets are NOT usable; only paid-tier assets are. Marked commercialUseOk='unclear' because usability depends on purchasing the paid membership rather than the assets being freely commercial-safe. Sources: https://freepbr.com/about-free-pbr/ and https://freepbr.com/product/download-all-pbr-textures-now/"
+        }
+      },
+      {
+        "name": "cgbookcase.com",
+        "url": "https://www.cgbookcase.com/license",
+        "license": "CC0 1.0 (Creative Commons Zero / public domain)",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "Seamless PBR textures/materials"
+        ],
+        "formats": [
+          "PNG",
+          "JPG"
+        ],
+        "mapsProvided": [
+          "Base Color / Albedo",
+          "Normal",
+          "Roughness",
+          "Ambient Occlusion",
+          "Height/Displacement",
+          "Metallic (where applicable)",
+          "Opacity (where applicable)"
+        ],
+        "relevanceToMdfFurniture": "High. Curated, high-quality library with strong wood, fabric, concrete, metal and tile sets ideal for furniture and interior rendering. Homepage tagline: 'PBR Textures, free for any purpose'.",
+        "accessNotes": "Free, no account required, up to 8K on many sets. Run by Dorian Zgraggen.",
+        "notes": "Confirmed CC0: textures published under CC0 1.0 — usable commercially and non-commercially, no credit required, and they may even be resold on their own. Homepage states '100% free, no restrictions' and 'free for any purpose'. The /license path returned 404 on direct fetch (site may have restructured), but CC0 status is consistently confirmed on the homepage and by multiple secondary sources; verify current wording at cgbookcase.com.",
+        "verified": {
+          "name": "cgbookcase.com",
+          "confirmed": true,
+          "commercialUseOk": "yes",
+          "attributionRequired": "no",
+          "actualLicense": "CC0 1.0 (Creative Commons Zero / public domain dedication)",
+          "correction": "The asserted URL https://www.cgbookcase.com/license returns HTTP 404 and does not exist. The license is instead documented on https://www.cgbookcase.com/textures , which states verbatim: \"The textures are published under the CC0 1.0 license, which means you can use them for free without giving credit,\" and links to the canonical deed https://creativecommons.org/publicdomain/zero/1.0/ . The homepage reinforces this with \"100% free, no restrictions\" and individual texture pages tag assets as \"cc0 texture.\" Verified against the official CC0 1.0 deed: commercial use is permitted (\"even for commercial purposes, all without asking permission\") and no attribution is required. Verdict: CONFIRMED — genuinely usable in a commercial design app. Standard CC0 caveats apply (do not imply endorsement by the author; CC0 waives copyright but not third-party rights such as trademarks or, where applicable, model/property releases for recognizable content). Recommend updating the recorded license URL to the /textures page since /license is dead."
+        }
+      },
+      {
+        "name": "Texture Ninja",
+        "url": "https://texture.ninja/",
+        "license": "CC0 (public domain)",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "Photographic reference textures / source photos (NOT pre-made PBR material sets)"
+        ],
+        "formats": [
+          "JPG (high-resolution photos)"
+        ],
+        "mapsProvided": [
+          "Diffuse/photo only — no ready-made PBR maps (normal/roughness/AO must be authored from the photos)"
+        ],
+        "relevanceToMdfFurniture": "Medium. Excellent as source photography for wood grain, fabric, walls, scratches/overlays and decals, but these are raw photos, not channel-packed PBR materials — you'd need to derive maps yourself (e.g. Materialize, Substance Sampler).",
+        "accessNotes": "Free, no account required. 5000+ images. Creator Joost Vanhoutte (supported via Patreon).",
+        "notes": "Confirmed CC0/public domain by CGPress and the site itself ('over 5000 images and textures under a CC0 public domain license'). Key distinction vs the others: this is a reference-photo library, not a PBR material library — no PBR maps are provided, so factor in extra authoring work for use in a renderer.",
+        "verified": {
+          "name": "Texture Ninja",
+          "confirmed": true,
+          "commercialUseOk": "yes",
+          "attributionRequired": "no",
+          "actualLicense": "CC0 1.0 (Public Domain Dedication)",
+          "correction": "Claims confirmed against the official source. Verified directly on texture.ninja (rendered via browser, since the site is a client-side SPA that returns no body text to plain fetchers). The homepage hero states verbatim: \"PUBLIC DOMAIN . CC0 - Royalty-free Textures ... Ready to download and use for art, games, and 3D work. No account, no attribution required.\" The site footer shows a \"Public Domain CC0\" badge and the tagline \"Free public-domain textures for everyone . (c) 2026.\" Individual texture pages offer direct download with no per-asset license gate or attribution requirement, so nothing at the asset level contradicts the site-wide CC0 claim. Adversarial note: some THIRD-PARTY aggregator summaries (e.g. textures.com FAQ, blog roundups) add a \"you may not redistribute unmodified textures\" caveat. That clause is NOT present on texture.ninja itself and is not part of the CC0 dedication. It would only matter if you tried to RE-HOST or resell the texture library as-is; it does not restrict using the textures inside a commercial design app/product. Verdict for a commercial design app: usable. commercialUseOk=yes, attributionRequired=no, license=CC0. Confidence high because the determination comes from the official site, not from memory or secondary sources."
+        }
+      },
+      {
+        "name": "Poliigon (free tier)",
+        "url": "https://help.poliigon.com/en/articles/8749749-asset-use-licensing",
+        "license": "Poliigon Free License (proprietary, NOT CC0)",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "PBR textures/materials",
+          "3D models",
+          "HDRIs"
+        ],
+        "formats": [
+          "JPG",
+          "PNG",
+          "EXR (HDRIs)",
+          "model formats vary"
+        ],
+        "mapsProvided": [
+          "Color/Albedo",
+          "Normal",
+          "Roughness",
+          "Displacement/Height",
+          "Ambient Occlusion",
+          "Metalness (where applicable)"
+        ],
+        "relevanceToMdfFurniture": "High quality but limited quantity. ~100+ free assets including wood, fabric and furniture-relevant materials; the bulk of the catalog is paid.",
+        "accessNotes": "Free account required. Only a limited curated set (~100+) is free; everything else is subscription/paid.",
+        "notes": "Official help-center license page: the Free License 'lets anyone use our free assets on personal or commercial projects.' BUT strict non-redistribution rules apply to ALL Poliigon assets (free included): cannot redistribute, repackage, share, or place where others can extract the source files; cannot use in AI/ML training; and — notably — cannot use in Creative Commons or open-source projects (because that would expose the source files). For a commercial closed product, embedding the rendered result is fine; shipping the raw texture files or open-sourcing them is not. Verify per-asset that it carries the Free License before download.",
+        "verified": {
+          "name": "Poliigon (free tier)",
+          "confirmed": false,
+          "commercialUseOk": "no",
+          "attributionRequired": "no",
+          "actualLicense": "Poliigon Free License — proprietary EULA, NOT CC0",
+          "correction": "The asserted \"commercial use: yes\" is misleading for THIS use case (a commercial design app). Verified against the official source (https://help.poliigon.com/en/articles/8749749-asset-use-licensing): the Poliigon Free License allows producing commercial *output* (e.g. a client render), and attribution is correctly NOT required. HOWEVER, an explicit prohibition that applies to ALL tiers (including free) forbids using assets \"in design software or games where the users have direct or indirect access to the assets for uses such as designing rooms, buildings, levels or scenes.\" A commercial design app where end users access/design with the assets is exactly the prohibited scenario. Embedding/baking the assets into the app also counts as prohibited redistribution. Therefore: NOT usable in a commercial design application. For non-app commercial work (renders, marketing, finished projects) it WOULD be fine without attribution. The proprietary/NOT-CC0 classification and \"no attribution\" are confirmed; the \"commercial use: yes\" claim does not hold for the design-app context and is marked 'no' for the asked use."
+        }
+      },
+      {
+        "name": "Quixel Megascans (now on Fab)",
+        "url": "https://www.fab.com/channels/quixel",
+        "license": "Fab Standard License (proprietary). Free Quixel starter pack (~1,500+ hand-picked assets) is free to all; rest of the Megascans library is now paid per-asset",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "Scanned PBR surfaces/materials",
+          "3D scanned models/assets",
+          "Decals",
+          "Plants (Megaplants)",
+          "Imperfections/overlays"
+        ],
+        "formats": [
+          "JPEG",
+          "PNG",
+          "EXR",
+          "model formats (FBX etc.)"
+        ],
+        "mapsProvided": [
+          "Albedo",
+          "Normal",
+          "Roughness",
+          "Displacement",
+          "Ambient Occlusion",
+          "Specular/Metalness",
+          "Cavity/Bump (varies by asset)"
+        ],
+        "relevanceToMdfFurniture": "High for surfaces/interiors (wood, fabric, plaster, concrete, metal, fine surface imperfections), but post-Fab the free portion is a curated subset (~1,500); broader furniture/interior coverage often falls in the now-paid catalog.",
+        "accessNotes": "Requires an Epic/Fab account. Free starter pack usable in any engine/tool. Legacy free-via-Bridge era ended; assets acquired free before the 2024 cutoff remain usable forever.",
+        "notes": "MAJOR LICENSE CHANGE — verify current state. Epic made the FULL Megascans library temporarily free to everyone through end of 2024 via the Fab launch. As of 2025 onward, only a curated free starter pack (~1,500+ assets) remains free; the rest of Megascans is sold per-asset on Fab (individual assets from ~$0.99, kits ~$4.99, packs ~$24.99). Everything (free or paid) is governed by the Fab Standard License: commercial use allowed, no attribution, but NO resale/redistribution of the asset as a standalone file. 'When you acquire Quixel content on Fab — whether free or paid — you can use it forever.' For Renderre, the free Megascans subset is fine commercially as long as you don't redistribute the source files; budget for paid assets if you need broad coverage. The Fab EULA (fab.com/eula) is the binding document — could not be fetched directly (403/cert errors); confirm wording there.",
+        "verified": {
+          "name": "Quixel Megascans (now on Fab)",
+          "confirmed": true,
+          "commercialUseOk": "yes",
+          "attributionRequired": "no",
+          "actualLicense": "Fab Standard License (proprietary; Personal and Professional tiers). Some free assets are offered under Creative Commons instead, but Megascans free content uses the Fab Standard License.",
+          "correction": "Claims are accurate and confirmed against official Epic sources. Minor clarifications: (1) The Standard License has two tiers — Personal (for entities under $100,000 USD gross revenue in the trailing 12 months) and Professional (required above that threshold). Both permit commercial use; it is a revenue-tier distinction, not a commercial gate. (2) The free Megascans starter pack (~1,500+ assets, plus Unreal-Engine-only tree packs/scenes) is free to all under the Fab Standard License; the remainder of the Megascans library moved to paid per-asset pricing (~$0.99 per asset, $4.99 kits, $24.99 packs) at the start of 2025. (3) The genuine Fab EULA restricts distributing the asset files themselves under a fully open-source license, and prohibits reselling/redistributing assets standalone — these do not block normal commercial use in a proprietary design app but matter if the project's assets were to be open-sourced. WARNING: a lookalike site (kb.fab-online.com) hosts fabricated EULA text (e.g. 'usage in the USA is not permitted', single-computer-only); this is NOT Epic's license and was disregarded. Rely only on fab.com/eula and dev.epicgames.com."
+        }
+      },
+      {
+        "name": "ambientCG",
+        "url": "https://ambientcg.com/list?q=wood",
+        "license": "CC0 1.0 Universal (Public Domain)",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "PBR wood textures",
+          "chipboard (aglomerado)",
+          "plywood (contrachapado)",
+          "wood floors"
+        ],
+        "formats": [
+          "JPG y PNG map sets",
+          "USDZ-compatible (PBR Maps)",
+          "resoluciones 1K a 8K"
+        ],
+        "mapsProvided": [
+          "Color",
+          "Normal (GL/DX)",
+          "Roughness",
+          "Displacement",
+          "AO",
+          "Metalness"
+        ],
+        "relevanceToMdfFurniture": "Muy alta y específica para tableros. Tiene 'Chipboard002/003/004' (aglomerado/MDP, la superficie real de muchos sustratos), 'Wood087' (Plywood Side / canto de contrachapado, útil para cantos de tableros), y la categoría Wood general. Lo más cercano a la materia prima de muebles de MDF/aglomerado.",
+        "accessNotes": "Descarga directa gratuita (Patreon ofrece extras como Nextcloud). API v1/v2/v3 en CSV/JSON/RSS para automatizar. Verificado.",
+        "notes": "Verificado en https://docs.ambientcg.com/license/: CC0 1.0; copiar, modificar, distribuir e incluso uso comercial sin permiso. Crédito sugerido pero NO obligatorio. Único repositorio que clasifica explícitamente 'Chipboard' y 'Plywood'.",
+        "verified": {
+          "name": "ambientCG",
+          "confirmed": true,
+          "commercialUseOk": "yes",
+          "attributionRequired": "no",
+          "actualLicense": "Creative Commons CC0 1.0 Universal (Public Domain Dedication)",
+          "correction": "All three asserted claims are confirmed against the official license page (https://docs.ambientcg.com/license/, the canonical target of the site's License link). Verbatim: assets are \"provided under the Creative Commons CC0 1.0 Universal License\" covering \"downloadable asset files and the material preview renders\"; commercial use is explicitly permitted (\"even for commercial purposes, all without asking permission\"); attribution is explicitly not required (\"You don't need to give credit\"). One non-blocking caveat: CC0 covers the asset files/renders only and does NOT cover the ambientCG name/logo/trademarks (CC0 never covers trademarks by design), so the textures are safe for a commercial design app but the ambientCG branding itself must not be reused."
+        }
+      },
+      {
+        "name": "cgbookcase",
+        "url": "https://www.cgbookcase.com/textures",
+        "license": "CC0 1.0 Universal",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "PBR wood textures",
+          "fine wood",
+          "wood floors"
+        ],
+        "formats": [
+          "Map sets (Albedo, Normal, Height, Roughness, AO, Metalness)",
+          "hasta 4K"
+        ],
+        "mapsProvided": [
+          "Albedo",
+          "Normal",
+          "Height",
+          "Roughness",
+          "AO",
+          "Metalness"
+        ],
+        "relevanceToMdfFurniture": "Media-alta. ~566 texturas, varias de madera fina y pisos útiles para superficies maderadas. Licencia muy permisiva (permite incluso revender las texturas solas).",
+        "accessNotes": "Descarga directa gratuita. Mantenido por Dorian Zgraggen (Patreon). Verificado en la página de texturas.",
+        "notes": "Verificado: 'The textures are published under the CC0 1.0 license... you can use them for free without giving credit.' Explícitamente permite uso comercial y reventa como parte de un modelo 3D o incluso de las texturas por separado. CC0 puro.",
+        "verified": {
+          "name": "cgbookcase",
+          "confirmed": true,
+          "commercialUseOk": "yes",
+          "attributionRequired": "no",
+          "actualLicense": "CC0 1.0 Universal (Public Domain Dedication)",
+          "correction": ""
+        }
+      },
+      {
+        "name": "TextureCan",
+        "url": "https://www.texturecan.com/category/Wood/",
+        "license": "CC0 1.0 Universal",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "PBR wood textures",
+          "laminated wood (laminado)",
+          "wood floors"
+        ],
+        "formats": [
+          "Map sets (Base Color, Normal, Roughness, Displacement, AO)",
+          "seamless/tileable",
+          "para Blender/Unreal/Unity/3ds Max/C4D/Maya"
+        ],
+        "mapsProvided": [
+          "Base Color",
+          "Normal",
+          "Roughness",
+          "Displacement",
+          "AO"
+        ],
+        "relevanceToMdfFurniture": "Alta. Tiene textura específica 'Laminated Wood' (laminado) y categoría Wood, directamente útil para simular laminados/melaminas. Buen ajuste a muebles laminados.",
+        "accessNotes": "Descarga directa gratuita, royalty-free. Verificado en página de términos.",
+        "notes": "Verificado en https://www.texturecan.com/terms/: 'All the PBR textures... are under the Creative Commons CC0 1.0 Universe License.' Uso comercial OK, sin atribución, redistribución junto a tus proyectos/assets permitida. Advertencia: el usuario es responsable de no infringir marcas/logos de terceros que pudieran aparecer.",
+        "verified": {
+          "name": "TextureCan",
+          "confirmed": true,
+          "commercialUseOk": "yes",
+          "attributionRequired": "no",
+          "actualLicense": "CC0 1.0 Universal (official terms page at https://www.texturecan.com/terms/ states \"Creative Commons CC0 1.0 Universe License\" — a typo for \"Universal\"; category page labels assets \"CC0 Textures\")",
+          "correction": "Asserted license/commercial/attribution all CONFIRMED against the official terms page (not memory). Verbatim: \"All textures can be used for any purposes, including commercial use\" and \"No credit or attribution is required while using the textures.\" Usable in a commercial design app. Two skeptical caveats: (1) The site's own license page is informally worded with typos (\"CC0 1.0 Universe\", \"togehter\"), so trust the intent rather than treating it as a polished legal document. (2) The sole restriction places responsibility on the USER for any third-party IP — \"In case there are brand names, logos and copyrighted graphics appear in the materials, it is the responsibility of the user not to infringe those copyrights in their projects.\" Low risk for plain wood textures. (3) Redistribution is explicitly allowed only \"together with your projects and 3D assets\"; the terms do not explicitly address reselling/repackaging the textures standalone as a competing texture pack — embedding them inside a design app is fine, but standalone resale is unaddressed."
+        }
+      },
+      {
+        "name": "EGGER Decorative Collection (Decor Image Downloads)",
+        "url": "https://www.egger.com/en/products/furniture-interior-design/decorative-collection/decor-downloads",
+        "license": "Propietario / copyright EGGER - 'General Terms for the Use of Images' (requiere aceptar términos y login myEGGER)",
+        "commercialUse": "unclear",
+        "attributionRequired": "unclear",
+        "contentTypes": [
+          "Imágenes de decores de melamina (MFC)",
+          "MFMDF",
+          "laminados HPL",
+          "muestras de texturas/superficies (ej. ST acabados)"
+        ],
+        "formats": [
+          "Imágenes de decor (descarga individual o paquetes de datos para CAD/print/web)"
+        ],
+        "mapsProvided": [],
+        "relevanceToMdfFurniture": "Referencia, NO textura libre. Altísima como referencia visual de patrones reales de melamina/laminado para muebles (decores tipo H1145, U/W lisos, acabados ST). Útil para identificar QUE patrón recrear, pero las imágenes en sí están protegidas.",
+        "accessNotes": "Requiere registro en myEGGER para descargar sin marca de agua. Al descargar se aceptan los 'General Terms for the Use of Images' de EGGER. Verificado que existen los términos; el texto completo está tras login.",
+        "notes": "NO es libre ni CC0. Imágenes con copyright de EGGER; uso pensado para clientes/distribuidores (reuniones, planificación, marketing del propio EGGER). Todos los decores son 'reproductions'. Para muebles de MDF úsese SOLO como referencia de patrón/color; recrear la textura con assets CC0 (Poly Haven/ambientCG) en vez de usar la imagen del fabricante en un producto comercial sin autorización. No se pudo confirmar permiso de uso comercial de terceros -> tratar como reservado.",
+        "verified": {
+          "name": "EGGER Decorative Collection (Decor Image Downloads)",
+          "confirmed": true,
+          "commercialUseOk": "unclear",
+          "attributionRequired": "unclear",
+          "actualLicense": "Proprietary / copyright EGGER. Access is gated by myEGGER login, and downloading requires agreeing to EGGER's \"General Terms for the Use of Images\" (confirmed on the official page: \"With the download of the images you agree to our General Terms for the Use of Images\" and \"you must be logged in to myEGGER to access these files\"). No open/Creative Commons license. The granted usage rights are framed by EGGER as scoped to EGGER-product-related work (\"clarified image and usage rights ... for EGGER product-related work\"), i.e. a manufacturer marketing/specification asset license, not a general-purpose stock/texture license.",
+          "correction": "The asserted license details are essentially correct, but with important caveats. CONFIRMED from official egger.com text: (1) proprietary EGGER copyright; (2) must agree to \"General Terms for the Use of Images\"; (3) myEGGER login required to download un-watermarked files. NOT VERIFIABLE: the full verbatim text of the \"General Terms for the Use of Images\" — it sits behind the myEGGER login and EGGER's site blocks automated access (live pages returned HTTP 403/404), so the exact commercial-use and attribution clauses could not be read from the official source. CAUTION for a commercial design app: EGGER consistently frames the usage rights as scoped to \"EGGER product-related work\" (CAD planning, print, websites that present/specify EGGER decors). There is NO publicly visible grant permitting redistribution or embedding of EGGER decor images as generic, selectable design assets/textures inside a third-party commercial design application. The CORPUS terms page that appeared in search is for CORPUS's own 3D models/software and is NOT authoritative for EGGER's image terms — it was disregarded. NOTE: the URL provided in the task currently 404s on direct fetch; the canonical live page is https://www.egger.com/en/decorative-collection/decor-downloads. VERDICT: treat as NOT cleared for a commercial design app until the full \"General Terms for the Use of Images\" is obtained via myEGGER and reviewed (and ideally written confirmation requested from EGGER), because the rights appear limited to EGGER-product-related use, not general commercial asset use."
+        }
+      },
+      {
+        "name": "Masisa (Catálogo de melaminas / Colección Diseño)",
+        "url": "https://www.masisa.com/ayuda/qu%C3%A9-texturas-pueden-tener-los-tableros-de-melamina",
+        "license": "Propietario / copyright Masisa (sin licencia abierta declarada)",
+        "commercialUse": "no",
+        "attributionRequired": "unclear",
+        "contentTypes": [
+          "Imágenes de decores de melamina y MDF",
+          "muestrarios",
+          "nombres de texturas reales (Liso Mate, Poro Natural, Softwood, Naturale, Natural Matt, Texstone, Alto Brillo)"
+        ],
+        "formats": [
+          "PDF de catálogo/muestrario",
+          "fichas en ArchDaily"
+        ],
+        "mapsProvided": [],
+        "relevanceToMdfFurniture": "Referencia regional clave (LatAm/Argentina). Muy útil para conocer los acabados/texturas reales de melamina sobre MDF que se usan en el mercado local y sus nombres comerciales, para luego recrearlos con texturas CC0.",
+        "accessNotes": "Catálogos accesibles vía sitio Masisa, ArchDaily y PDFs de distribuidores. Al descargar se aceptan términos del proveedor. No declara CC0 ni uso libre.",
+        "notes": "NO libre. Imágenes/decores con derechos de Masisa. Tratar como referencia de diseño y nomenclatura de acabados (qué textura simular), no como fuente de texturas reutilizables en un render comercial. Los nombres de textura (Poro Natural, Softwood, Naturale, Natural Matt) son útiles para mapear a equivalentes CC0."
+      },
+      {
+        "name": "Faplac / ARAUCO (Melamina) - Descargar Diseños",
+        "url": "https://arauco.com/argentina/marcas/faplacmelamina/",
+        "license": "Propietario / copyright ARAUCO-Faplac (sin licencia abierta declarada)",
+        "commercialUse": "no",
+        "attributionRequired": "unclear",
+        "contentTypes": [
+          "Imágenes de diseños de melamina (60 diseños): plenos, maderados, hilados, piedras",
+          "colecciones (Everest, Sahara, Tribal, Himalaya, Nordic, Nature, etc.)",
+          "ficha técnica"
+        ],
+        "formats": [
+          "ZIP 'Descargar Diseños' (Argentina)",
+          "catálogo digital PDF"
+        ],
+        "mapsProvided": [],
+        "relevanceToMdfFurniture": "Referencia regional clave (Argentina). El ZIP 'Descargar Diseños' aporta las imágenes de los decores reales de Faplac sobre MDF/MDP usados localmente; excelente para reproducir el aspecto exacto de un mueble cotizado con melamina Faplac.",
+        "accessNotes": "Hay un ZIP de diseños descargable para Argentina en la web oficial. La página NO muestra términos de uso explícitos ni nota CC0; el enfoque es comercial (compra de producto).",
+        "notes": "NO libre / sin licencia abierta. Imágenes de decores propiedad de ARAUCO-Faplac. Ausencia de términos explícitos NO implica permiso: por defecto está reservado el copyright. Usar como referencia visual de patrón/color (mapear a CC0). Para un render comercial conviene recrear la textura con assets CC0 (Poly Haven/ambientCG) en vez de incrustar la imagen del fabricante. Para uso real del decor en producto, solicitar autorización a ARAUCO."
+      },
+      {
+        "name": "Poly Pizza",
+        "url": "https://poly.pizza/",
+        "license": "Mixed Creative Commons, per-model — predominantly CC0 1.0 (Public Domain) and CC-BY. License is shown on each model page and via the API. CC0 = no attribution; CC-BY = credit required.",
+        "commercialUse": "yes",
+        "attributionRequired": "unclear",
+        "contentTypes": [
+          "3D models",
+          "furniture",
+          "props",
+          "characters",
+          "environment"
+        ],
+        "formats": [
+          "GLB",
+          "glTF"
+        ],
+        "mapsProvided": [],
+        "relevanceToMdfFurniture": "Dedicated 'Furniture' category with many low-poly furniture pieces (chairs, tables, sofas, beds, shelving); also re-hosts the full Kenney Furniture Kit. Stylized low-poly rather than photoreal MDF, but ideal for quickly populating scenes. Direct GLB download per model.",
+        "notes": "Built on the former Google Poly archive plus community uploads. Per-model license: filter to the CC0 tag (poly.pizza/search/CC0) for no-attribution commercial use; CC-BY models require crediting the creator. Free API (poly.pizza/docs/api/v1.1) returns license and attribution string per model, useful for programmatic scene-building. Verified against the official ToS (poly.pizza/docs/tos): downloaders must follow the CC license applying to each item at download time.",
+        "accessNotes": "Free; no account strictly required for browsing/download. API key available for bulk/programmatic use.",
+        "verified": {
+          "name": "Poly Pizza",
+          "confirmed": true,
+          "commercialUseOk": "yes",
+          "attributionRequired": "unclear",
+          "actualLicense": "Mixed per-model Creative Commons, confirmed via official TOS, model credits pages, the license search filter, and the API. Predominantly CC0 1.0 (Public Domain) and CC-BY (e.g. CC-BY 3.0). The TOS states verbatim: \"By downloading User Content made available by other Users, you agree to adhere to the terms of the Creative Commons license that applies at the time of download\" and \"We do not claim ownership over any User Content.\" Each model page and API response carries its own Licence field plus an Attribution string.</actualLicense>\n<parameter name=\"commercialUseOk\">yes",
+          "correction": "The \"Mixed CC, predominantly CC0/CC-BY\" claim is CONFIRMED against official sources, and commercial use is CONFIRMED (both CC0 and standard CC-BY permit commercial use; no NonCommercial variants are the norm). However, two refinements: (1) Attribution is not truly \"unclear\" — it is CONDITIONAL on the specific model's license: CC0 = no attribution required; CC-BY = attribution legally required (credit creator, model link, and license link, as provided in the API's Attribution field). Treat the per-model license as authoritative. (2) The headline risk for a COMMERCIAL DESIGN APP is the mixed/per-model nature: you cannot apply one blanket rule. The app must read and store each model's license at download time and surface/attach CC-BY attribution automatically, or restrict ingestion to CC0-only (the site provides a CC0 license filter and the API exposes the Licence field, making this enforceable). With per-model license handling, Poly Pizza IS usable commercially; without it, you risk CC-BY non-compliance. Marking attributionRequired as 'unclear' because it cannot be answered globally — it is yes for CC-BY assets and no for CC0 assets."
+        }
+      },
+      {
+        "name": "Quaternius",
+        "url": "https://quaternius.com/",
+        "license": "CC0 1.0 (Public Domain) for all assets.",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "3D models",
+          "asset packs",
+          "furniture",
+          "interiors",
+          "props",
+          "characters",
+          "nature",
+          "sci-fi"
+        ],
+        "formats": [
+          "glTF",
+          "GLB",
+          "FBX",
+          "OBJ",
+          "Blend"
+        ],
+        "mapsProvided": [],
+        "relevanceToMdfFurniture": "Offers an 'Ultimate Furniture Pack' and 'Ultimate House Interior Pack' with stylized low-poly furniture (sofas, tables, chairs, cabinets, beds, kitchen/bathroom fixtures). Cohesive art style across packs makes it good for furnishing entire stylized rooms. Not photoreal MDF, but consistent and free for any use.",
+        "notes": "Officially CC0 — free for personal, educational and commercial projects, no attribution required (stated on quaternius.com and on the itch.io pack pages). Packs download as full bundles; glTF/GLB drop straight into three.js/web or game engines. Part of each pack is free with optional Patreon/itch support; free assets remain CC0.",
+        "accessNotes": "Free downloads from quaternius.com and quaternius.itch.io; optional paid support tiers do not change the CC0 license.",
+        "verified": {
+          "name": "Quaternius",
+          "confirmed": true,
+          "commercialUseOk": "yes",
+          "attributionRequired": "no",
+          "actualLicense": "CC0 1.0 Universal (Public Domain Dedication)",
+          "correction": "Asserted license is accurate. Note: the quaternius.com homepage itself shows no explicit license text (only \"© Quaternius\" + Patreon/email); the CC0 grant is stated on each individual pack page and on the official itch.io pages. Confirmed CC0 1.0 via per-pack pages (e.g., universalanimationlibrary2.html: \"Free to use in personal, educational and commercial projects. (CC0 License)\"), the official itch.io listing (\"Creative Commons Zero v1.0 Universal (CC0) — Free to use in any project, even commercially!\"), and the official Patreon (\"released under CC0... even for commercial uses and without having to credit me\"). CC0 permits commercial use and requires no attribution. Operational caveat: verify CC0 per pack at download time since labeling is per-pack rather than a single global terms page."
+        }
+      },
+      {
+        "name": "Kenney.nl",
+        "url": "https://kenney.nl/assets",
+        "license": "CC0 1.0 (Public Domain) for all assets.",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "3D models",
+          "asset packs",
+          "furniture",
+          "building kits",
+          "props"
+        ],
+        "formats": [
+          "glTF",
+          "FBX",
+          "OBJ"
+        ],
+        "mapsProvided": [],
+        "relevanceToMdfFurniture": "The 'Furniture Kit' (kenney.nl/assets/furniture-kit) is directly on-point: ~116 furniture/interior models (tables, chairs, beds, shelves, cabinets, lamps) plus related City/building kits. Clean, modular, uniformly scaled low-poly pieces well suited to assembling rooms in glTF/GLB pipelines. Stylized, not photoreal MDF.",
+        "notes": "All Kenney assets are CC0 — free even commercially, no attribution required (credit 'Kenney' optional). Verified on the official support page (kenney.nl/support) and the Furniture Kit page. Furniture Kit ships in FBX, OBJ and glTF; glTF/GLB import directly into Unity, Unreal, Godot, three.js and AR/VR.",
+        "accessNotes": "Free download from kenney.nl (mirrored on kenney.itch.io). No account required. 'Kenney Game Assets All-in-1' bundles everything.",
+        "verified": {
+          "name": "Kenney.nl",
+          "confirmed": true,
+          "commercialUseOk": "yes",
+          "attributionRequired": "no",
+          "actualLicense": "CC0 1.0 Universal (Public Domain Dedication)",
+          "correction": "Asserted license is confirmed accurate. Verified on the official per-asset pages (e.g. kenney.nl/assets/development-essentials shows \"Creative Commons CC0\") and the official support/FAQ (kenney.nl/support): \"all game assets on the asset pages are public domain licensed (CC0)... free to use them, even in commercial projects\" and \"Attribution is not required.\" Caveats: (1) CC0 applies to the game ASSETS only — the Kenney LOGO is explicitly excluded (\"reserved for official projects by our studio\"), a trademark carve-out that does not affect using the assets. (2) The license is documented on the asset pages, the support page, and the license file inside each download — NOT in the site Terms of Service, which contains no license terms. (3) CC0 carries no warranty or IP indemnification (standard). For a commercial design app the assets are usable with no attribution and no permission required."
+        }
+      },
+      {
+        "name": "Sketchfab",
+        "url": "https://sketchfab.com/",
+        "license": "Mixed, per-model. (1) Creative Commons: CC0/Public Domain, CC-BY, CC-BY-SA, CC-BY-ND, CC-BY-NC, CC-BY-NC-SA, CC-BY-NC-ND; (2) Sketchfab's own Standard and Editorial royalty-free licenses. Commercial use and attribution vary by license.",
+        "commercialUse": "unclear",
+        "attributionRequired": "unclear",
+        "contentTypes": [
+          "3D models",
+          "furniture",
+          "scanned/photoreal assets",
+          "props",
+          "scenes"
+        ],
+        "formats": [
+          "glTF",
+          "GLB",
+          "USDZ",
+          "original upload format (often FBX/OBJ/Blend)"
+        ],
+        "mapsProvided": [
+          "PBR textures (varies per model)"
+        ],
+        "relevanceToMdfFurniture": "Largest selection and most photoreal options — scanned and PBR furniture that can resemble real wood/MDF materials. Best source if you need realistic furniture rather than low-poly, but requires careful per-model license checking.",
+        "notes": "700,000+ models downloadable under Creative Commons. For safe commercial use WITHOUT attribution, filter to CC0/Public Domain (sketchfab.com/tags/cc0). CC-BY/SA allow commercial use but REQUIRE crediting the author and Sketchfab; NC variants forbid commercial use; ND forbids modifying; Editorial forbids commercial/promotional use. Verified against the official License Agreement (sketchfab.com/licenses). Use filters: Downloadable + License (CC0) + Format (glTF) + category Furniture.",
+        "accessNotes": "Free account required to download. Filter by 'Downloadable', license type, and file format. Now part of Epic's Fab ecosystem (support moved to support.fab.com)."
+      },
+      {
+        "name": "Khronos glTF Sample Assets",
+        "url": "https://github.com/KhronosGroup/glTF-Sample-Assets",
+        "license": "Mixed, per-model — repository is CC-BY 4.0; individual models vary (many CC-BY 4.0, some CC0, some other CC variants). Each model's README.md states its specific license.",
+        "commercialUse": "yes",
+        "attributionRequired": "yes",
+        "contentTypes": [
+          "glTF feature-demonstration models",
+          "a few household objects",
+          "technical test assets"
+        ],
+        "formats": [
+          "glTF (separate)",
+          "glTF-Embedded",
+          "GLB"
+        ],
+        "mapsProvided": [
+          "PBR textures",
+          "normal / metallic-roughness maps (varies per model)"
+        ],
+        "relevanceToMdfFurniture": "Low relevance for furnishing scenes — this is a technical test/demo set (DamagedHelmet, candle holder, boxes, etc.) to validate glTF feature support, not a furniture catalog. Useful mainly as reference/test geometry or to confirm a glTF pipeline works, not as a furniture content library.",
+        "notes": "Most assets are CC-BY 4.0, so commercial use is allowed but ATTRIBUTION IS REQUIRED; a subset is CC0. Check each model's directory README for the exact license — do not assume CC0. Provided in standard glTF, embedded glTF and GLB. Verified on the official KhronosGroup/glTF-Sample-Assets repo (older glTF-Sample-Models repo is deprecated and redirects here).",
+        "accessNotes": "Free, public GitHub repo; clone or download per-model. No account needed."
+      },
+      {
+        "name": "BlenderKit (free tier)",
+        "url": "https://www.blenderkit.com/",
+        "license": "Two free licenses, per-asset: Royalty-Free and CC0 1.0 (Public Domain). All free assets are usable commercially.",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "contentTypes": [
+          "3D models",
+          "furniture",
+          "materials",
+          "HDRIs",
+          "brushes",
+          "scenes"
+        ],
+        "formats": [
+          "Blender .blend (native, via add-on)"
+        ],
+        "mapsProvided": [
+          "PBR materials",
+          "HDRIs"
+        ],
+        "relevanceToMdfFurniture": "High relevance for realistic furniture — large library of photoreal/PBR furniture (chairs, tables, sofas, cabinets, kitchen/MDF-style pieces) with proper materials. Best when working inside Blender; for a glTF/GLB web pipeline you must export from Blender yourself (no direct GLB download).",
+        "notes": "17,000+ free models, 26,000+ materials, 2,000+ HDRIs. Both free licenses permit commercial use without attribution. KEY DIFFERENCE: Royalty-Free forbids reselling the asset 'in the same form' (e.g. re-selling the model as a model/asset pack), though derivative/higher-level works are fine; CC0 places the asset fully in the public domain with no restrictions, including resale. Verified on the official licenses page (blenderkit.com/docs/licenses, currently redirecting to blendkit.com/docs/licenses). Filter by license in the add-on/website to pick CC0 if resale rights are needed.",
+        "accessNotes": "Primarily delivered through the free BlenderKit add-on inside Blender (search + drag-and-drop); free account/API key recommended. Assets are .blend — export to glTF/GLB via Blender's exporter for web/engine use."
+      },
+      {
+        "name": "Poly Haven (HDRIs, ex-HDRI Haven)",
+        "url": "https://polyhaven.com/hdris",
+        "license": "CC0 1.0 (Creative Commons Zero / Public Domain)",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "formats": [
+          ".hdr",
+          ".exr",
+          ".jpg (tonemapped)"
+        ],
+        "contentTypes": [
+          "interior/indoor HDRIs",
+          "exterior",
+          "studio",
+          "skies",
+          "nature",
+          "urban"
+        ],
+        "mapsProvided": [
+          "equirectangular HDRI (lat-long)",
+          "tonemapped JPG preview"
+        ],
+        "relevanceToMdfFurniture": "Fuente principal recomendada. Tiene categoria dedicada de interiores (https://polyhaven.com/hdris/indoor) ideal para iluminar y reflejar muebles MDF en escenas de habitacion/estudio. Los reflejos suaves de interior dan acabado realista a laminados/melaminas. Integracion directa con Three.js via RGBELoader (.hdr) o EXRLoader (.exr) + PMREMGenerator para environment/IBL.",
+        "notes": "Licencia verificada en la pagina oficial https://polyhaven.com/license : texto literal 'You can use our assets for any purpose, including commercial work' y 'You do not need to give credit or attribution when using them (although it is appreciated)'. Resoluciones confirmadas en pagina oficial de asset de interior (glasshouse_interior): 1K, 2K, 4K, 8K, 16K y 24K. Recomendacion practica para web/Three.js: usar 1K-2K .hdr para mantener el peso bajo (8K+ es demasiado pesado para web). HDRI Haven y Texture Haven se fusionaron en Poly Haven; ya no existe hdrihaven.com como sitio separado.",
+        "accessNotes": "Descarga directa sin cuenta ni watermark. Selector de resolucion y formato (EXR/HDR) por asset."
+      },
+      {
+        "name": "Open HDRI (openhdri.org)",
+        "url": "https://openhdri.org/",
+        "license": "CC0 (Creative Commons Zero / Public Domain)",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "formats": [
+          ".exr (32-bit float)"
+        ],
+        "contentTypes": [
+          "HDRIs ultra alta resolucion",
+          "studio",
+          "interiores (Chapel Interior, Big Studio, Fly Studio)",
+          "industrial",
+          "exterior"
+        ],
+        "mapsProvided": [
+          "equirectangular HDRI 32-bit float"
+        ],
+        "relevanceToMdfFurniture": "Fuente CC0 nueva (~2025) con HDRIs de estudio e interior de altisima calidad y rango dinamico (12-27 EV), muy buenos para reflejos limpios en superficies laminadas/brillantes de muebles MDF. La resolucion 29K es excesiva para web; reescalar a 1K-2K para Three.js.",
+        "notes": "CC0 confirmado por la home oficial y multiples fuentes editoriales (CG Channel, cgtricks, Digital Production). Resolucion hasta 29.696 x 14.848 px, archivos EXR 32-bit. Autor: Grzegorz Wronkowski. NOTA: el sitio devolvio HTTP 403 a fetch automatizado, por lo que la licencia se corroboro via cobertura editorial y la descripcion oficial del sitio; verificar el badge CC0 en la pagina de cada asset antes de usar.",
+        "accessNotes": "Sin cuenta ni ads. Verificacion directa via fetch bloqueada (403); confirmar licencia en la pagina del asset al descargar."
+      },
+      {
+        "name": "CGEES (cgees.com)",
+        "url": "https://cgees.com/",
+        "license": "CC0 (Creative Commons Zero)",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "formats": [
+          ".hdr"
+        ],
+        "contentTypes": [
+          "HDRI skies",
+          "HDRI environments",
+          "360 panoramas",
+          "algunos interiores"
+        ],
+        "mapsProvided": [
+          "equirectangular HDRI (sRGB)"
+        ],
+        "relevanceToMdfFurniture": "Fuente CC0 alternativa enfocada en cielos y entornos hasta 24K. Util para iluminacion ambiental general de escenas con mobiliario; menos catalogo de interior puro que Poly Haven/Open HDRI. Sucesor espiritual de iHDRI.com.",
+        "notes": "CC0 con uso comercial y sin atribucion segun el sitio (https://cgees.com/legal) y cobertura CG Channel (nov-2025). Resoluciones 1K-24K, exportados como .HDR en sRGB. NOTA: cgees.com/legal devolvio HTTP 403 a fetch automatizado; licencia corroborada via resultados de busqueda y descripcion del sitio. Confirmar en pagina del asset.",
+        "accessNotes": "Sin cuenta ni watermark. Verificacion directa via fetch bloqueada (403)."
+      },
+      {
+        "name": "sIBL Archive (HDRLabs)",
+        "url": "http://www.hdrlabs.com/sibl/archive.html",
+        "license": "CC BY-NC-SA 3.0 (Attribution-NonCommercial-ShareAlike) - NO COMERCIAL",
+        "commercialUse": "no",
+        "attributionRequired": "yes",
+        "formats": [
+          ".hdr",
+          ".exr",
+          ".jpg",
+          ".ibl (set sIBL)"
+        ],
+        "contentTypes": [
+          "sIBL sets (HDRI + mapas auxiliares)",
+          "interiores",
+          "exteriores"
+        ],
+        "mapsProvided": [
+          "HDRI environment",
+          "reflection map",
+          "background JPG",
+          "sun/light info (.ibl)"
+        ],
+        "relevanceToMdfFurniture": "NO recomendado para producto comercial. Coleccion historica de IBL de alta calidad pero bajo CC BY-NC-SA 3.0 (no comercial + share-alike), incompatible con un proyecto comercial de muebles MDF. Util solo para prototipos/aprendizaje internos no comerciales.",
+        "notes": "Licencia CC BY-NC-SA 3.0 US confirmada por busquedas y archivos de acknowledgement de terceros (repos en GitHub). La pagina oficial devolvio 404/intermitente al fetch. EXCLUIR si el uso es comercial. La licencia puede variar por item, asi que ademas conviene revisar cada set.",
+        "accessNotes": "Descarga directa sin cuenta. Pagina oficial intermitente (404 en fetch)."
+      },
+      {
+        "name": "HDRI Skies (hdri-skies.com)",
+        "url": "https://hdri-skies.com/",
+        "license": "Licencia propietaria de HDRI Skies (NO es CC0)",
+        "commercialUse": "yes",
+        "attributionRequired": "no",
+        "formats": [
+          ".hdr"
+        ],
+        "contentTypes": [
+          "HDRI de cielos",
+          "entornos exteriores"
+        ],
+        "mapsProvided": [
+          "equirectangular HDRI sky"
+        ],
+        "relevanceToMdfFurniture": "Uso limitado y con cautela. Permite uso comercial del producto final, PERO la licencia PROHIBE redistribuir, sublicenciar o empaquetar el HDR junto a una escena/modelo 3D. En Three.js el HDRI se sirve como archivo estatico publico (queda descargable por el cliente), lo que puede chocar con esa clausula. Para muebles MDF priorizar fuentes CC0 (Poly Haven / Open HDRI / ambientCG) y evitar esta salvo iluminacion sin exponer el archivo.",
+        "notes": "NO es CC0. Free tier solo 2K; resoluciones mayores (hasta 20K) son de pago. Restricciones en https://hdri-skies.com/terms-of-use/ : 'cannot sub-license, re-sell, repackage, rent, lend... or otherwise redistribute single images... including bundling the image with a 3D scene, 3D model'. Riesgo legal si el .hdr se sirve como asset web publico. Verificar terminos vigentes antes de usar en produccion.",
+        "accessNotes": "Free tier limitado a 2K. Resto de pago. Revisar terms-of-use por entidad/licencia unica."
+      }
+    ],
+    "imageToPbr": {
+      "techniques": [
+        {
+          "name": "Albedo directo desde la imagen subida",
+          "approach": "Usar la imagen tal cual como base color (map). En el navegador se carga con TextureLoader / new THREE.Texture(canvas) desde un <img>/ImageBitmap/canvas. Es la unica capa que es 'real'; el resto de los mapas son derivados aproximados de esta. Conviene opcionalmente atenuar el shading horneado en la foto (delighting basico: restar/normalizar luminancia local) para que el albedo no traiga sombras quemadas, aunque un delight perfecto requiere ML.",
+          "browserFeasible": "yes",
+          "libsOrTools": [
+            "three.js TextureLoader",
+            "Canvas2D / ImageBitmap",
+            "ImageData"
+          ],
+          "quality": "Alta para el albedo en si (es la imagen original). El punto debil es que las fotos reales ya traen sombras/iluminacion horneada que el PBR no deberia tener; sin delight el material reacciona raro a luces nuevas.",
+          "notes": "Setear texture.colorSpace = THREE.SRGBColorSpace en el albedo (verificado en docs three.js / Texture.colorSpace). texture.wrapS = wrapT = RepeatWrapping para tiling."
+        },
+        {
+          "name": "Normal map desde heightmap por Sobel/Scharr (grayscale -> gradientes)",
+          "approach": "Convertir la imagen a escala de grises (luminancia) y tratarla como heightmap. Para cada pixel calcular gradientes Gx, Gy con el operador Sobel (kernels [[-1,0,1],[-2,0,2],[-1,0,1]] y su transpuesta) o Scharr (mejor preservacion de detalle). El normal tangente es normalize(vec3(-Gx*strength, -Gy*strength, 1)) y se codifica a RGB con n*0.5+0.5. Se ejecuta sobre ImageData (CPU) o, mucho mas rapido, en un fragment shader / WebGL pasando la imagen como textura y muestreando vecinos.",
+          "browserFeasible": "yes",
+          "libsOrTools": [
+            "Canvas2D getImageData/putImageData (CPU)",
+            "WebGL/GLSL fragment shader (GPU)",
+            "three.js WebGLRenderTarget para render-to-texture",
+            "cpetry/NormalMap-Online (MIT, client-side WebGL, reutilizable como referencia/codigo)"
+          ],
+          "quality": "Buena-media para superficies con detalle de relieve coherente con el brillo (piedra, tela, corteza, asfalto). Falla cuando el color NO corresponde a altura (p.ej. una mancha oscura plana genera un falso surco). Es la aproximacion estandar y la mas usada para 'normal from image'.",
+          "notes": "colorSpace = NoColorSpace en el normalMap (es data, no color; verificado). Exponer 'strength' (normalScale en three) al usuario. Aplicar un leve blur previo reduce ruido. Para tiling, el calculo debe muestrear con wrap para no romper bordes."
+        },
+        {
+          "name": "Roughness aproximada por inversion/remapeo de luminancia",
+          "approach": "Derivar roughnessMap de la luminancia de la imagen: zonas brillantes/especulares suelen ser mas lisas (menor roughness) y zonas mate/oscuras mas rugosas. Tipico: roughness = 1 - normalize(luminance) con contraste/gamma ajustables, o usar el detalle de alta frecuencia (high-pass) como proxy de microrrelieve. Tambien se puede mezclar con la varianza local. Se calcula en Canvas2D o shader.",
+          "browserFeasible": "yes",
+          "libsOrTools": [
+            "Canvas2D ImageData",
+            "WebGL shader",
+            "controles de min/max/contraste/invert"
+          ],
+          "quality": "Baja-media: es una heuristica, no una medicion fisica. Da resultados 'plausibles' y editables pero no precisos. Conviene exponer sliders (roughness base + intensidad del mapa) y permitir invertir, porque el signo correcto depende de la imagen.",
+          "notes": "colorSpace = NoColorSpace. Empaquetable junto a metalness/AO (ver tecnica de channel packing)."
+        },
+        {
+          "name": "Metalness: escalar binario en vez de mapa",
+          "approach": "En PBR metallic/roughness el metal es casi binario (0 o 1). Para una sola foto rara vez se puede inferir bien que parte es metal, asi que lo practico es exponer material.metalness como slider global (default 0 para no-metales) en lugar de generar un metalnessMap dudoso. Solo generar mapa si la imagen es claramente mixta metal/no-metal.",
+          "browserFeasible": "yes",
+          "libsOrTools": [
+            "three.js MeshStandardMaterial.metalness"
+          ],
+          "quality": "N/A (decision de diseno). Mejor que un mapa inventado: evita artefactos. Esto lo recomienda explicitamente la comunidad three.js.",
+          "notes": "Confirmado en el foro three.js (PBR from one image): suele alcanzar con setear metalness 0/1 directo."
+        },
+        {
+          "name": "Ambient Occlusion aproximado (cavities desde heightmap)",
+          "approach": "Derivar aoMap del heightmap: las zonas hundidas (bajo height, alta concavidad) se oscurecen. Aproximaciones client-side: invertir/curvar la luminancia, o estimar cavidad a partir de los mismos gradientes Sobel (segunda derivada / curvatura). Herramientas de escritorio como Materialize y laigter implementan AO/cavity 'real' por trazado en altura; en browser se hace una version mas barata.",
+          "browserFeasible": "partial",
+          "libsOrTools": [
+            "WebGL shader (curvature/cavity)",
+            "Materialize (referencia de algoritmo)",
+            "laigter (referencia)"
+          ],
+          "quality": "Media para cavity-AO barato; un AO por raymarching de altura es mas costoso pero factible en GPU. Como es derivado de la misma imagen, refuerza el detalle pero puede duplicar lo que ya hace el normal.",
+          "notes": "colorSpace = NoColorSpace. En three moderno aoMap usa el set de UV estandar (uv); versiones viejas requerian uv2/geometry second UV. Empaquetar en canal R junto a roughness (G) y metalness (B) reduce requests."
+        },
+        {
+          "name": "Displacement / bump opcional desde el mismo heightmap",
+          "approach": "El mismo grayscale sirve como displacementMap (desplaza vertices, requiere geometria con suficientes segmentos) o bumpMap (perturbacion de normal sin desplazar, mas barato y sin tesselado). Para una sola imagen suele alcanzar con normalMap; displacement se reserva para acercamientos.",
+          "browserFeasible": "yes",
+          "libsOrTools": [
+            "three.js displacementMap/displacementScale",
+            "three.js bumpMap/bumpScale"
+          ],
+          "quality": "Media; displacement realista necesita malla densa y buen height. bumpMap es un atajo decente si no se quiere generar normal.",
+          "notes": "NoColorSpace. displacementMap puede usar UV propias; cuidar displacementBias para no 'inflar' la malla."
+        },
+        {
+          "name": "Seamless / tiling en cliente (offset + cross-fade)",
+          "approach": "Para que el material repita sin costuras: offset 50% en X e Y (lleva los bordes al centro) y luego blend con gradiente/feather sobre la costura, o mirror de bordes. Tecnicas mas avanzadas: blending que preserva histograma (Gaussian-weighted) para no lavar el detalle. Todo en Canvas2D o WebGL. Importante: tilear el albedo y derivar normal/rough DESPUES, o derivar muestreando con wrap, para que los mapas tambien sean seamless.",
+          "browserFeasible": "yes",
+          "libsOrTools": [
+            "Canvas2D drawImage con wrap manual",
+            "WebGL shader (offset+feather)",
+            "texturas: wrapS/wrapT = THREE.RepeatWrapping + repeat.set(x,y)"
+          ],
+          "quality": "Offset+blend: media-alta para texturas estocasticas (piedra, tela, ruido); pobre para patrones con estructura fuerte (ladrillos, rejillas) donde se notan repeticiones. Histogram-preserving da mejor resultado que clone/offset simple.",
+          "notes": "En three el tiling visual final se controla con texture.repeat y RepeatWrapping; el 'make seamless' es para que ese repeat no muestre costura."
+        },
+        {
+          "name": "Pipeline desktop offline: Materialize (GPL3, Unity) o laigter (open source)",
+          "approach": "Si la calidad importa mas que el 100% navegador: Materialize (Bounding Box Software, GPL3, Windows) genera Normal, Height, AO/edge, smoothness/metallic desde una sola imagen e incluye make-seamless; laigter (open source, GitHub azagaya/laigter) genera normal, specular, occlusion y parallax y exporta. Sirven como tool de pre-proceso o como referencia de algoritmos para portar a JS/WebGL.",
+          "browserFeasible": "no",
+          "libsOrTools": [
+            "Materialize (boundingboxsoftware.com, GPL3, fork en GitHub)",
+            "laigter (GitHub azagaya/laigter)",
+            "NormalMap-Online (browser, MIT) como equivalente client-side parcial"
+          ],
+          "quality": "Alta/profesional (Materialize) y buena (laigter) comparado con heuristicas JS caseras. Costo: no es in-browser (Materialize es app Unity Windows; laigter es Qt desktop).",
+          "notes": "Materialize es GPL3 (impacto de licencia si se integra codigo). Para una web 100% cliente, replicar sus pasos en shaders es el camino; NormalMap-Online (MIT) es el mas directo de reutilizar."
+        },
+        {
+          "name": "Configuracion del material en three.js (MeshStandardMaterial / MeshPhysicalMaterial)",
+          "approach": "Crear MeshStandardMaterial y asignar: map (albedo, SRGBColorSpace), normalMap (+ normalScale = new THREE.Vector2(s,s)), roughnessMap (+ roughness base), metalness (escalar) o metalnessMap, aoMap (+ aoMapIntensity), opcional displacementMap/bumpMap. Todos los mapas de datos con colorSpace = NoColorSpace; el albedo con SRGBColorSpace. Para repetir: wrapS/wrapT = RepeatWrapping y repeat.set(). Necesita iluminacion/IBL (envMap o luces) para verse PBR. MeshPhysicalMaterial agrega clearcoat, sheen, transmission/ior, iridescence para acabados especiales (barniz, tela, vidrio).",
+          "browserFeasible": "yes",
+          "libsOrTools": [
+            "three.js MeshStandardMaterial",
+            "three.js MeshPhysicalMaterial",
+            "RGBELoader/EquirectangularReflectionMapping para envMap (IBL)",
+            "texture.colorSpace, RepeatWrapping, normalScale, aoMapIntensity"
+          ],
+          "quality": "Alta: el render PBR de three es solido. La calidad final depende de la calidad de los mapas derivados y de tener un buen environment map para reflejos.",
+          "notes": "Verificado en docs three.js: albedo y mapas de color = SRGBColorSpace; normalMap/roughnessMap/metalnessMap/aoMap = NoColorSpace (son data). Sin envMap/luces el metalness y la roughness casi no se aprecian."
+        }
+      ],
+      "recommendation": "Si, es totalmente factible en el navegador con three.js, asumiendo que el resultado es una APROXIMACION editable, no un material escaneado fisicamente.\n\nPipeline recomendado 100% cliente (todo con Canvas2D/WebGL, sin servidor):\n1) Albedo = la imagen subida tal cual (texture.colorSpace = THREE.SRGBColorSpace). Opcional: un delight basico (high-pass / normalizacion de luminancia local) para suavizar sombras horneadas.\n2) Heightmap = luminancia en escala de grises de la imagen (con un leve blur para reducir ruido).\n3) Normal map = Sobel (o Scharr para mas detalle) sobre el heightmap, codificado n*0.5+0.5, idealmente en un fragment shader para velocidad. colorSpace = NoColorSpace, intensidad expuesta via normalScale.\n4) Roughness map = remapeo de luminancia (roughness = 1 - lum, con contraste/invert ajustables); NoColorSpace.\n5) Metalness = slider escalar global (default 0); NO generar metalnessMap salvo que la imagen sea claramente mixta (lo recomienda la comunidad three.js).\n6) AO/cavity opcional desde curvatura del heightmap; empaquetar AO(R)+Rough(G)+Metal(B) en una sola textura para menos requests.\n7) Seamless opcional: offset 50% + cross-fade (o histogram-preserving) en cliente; configurar RepeatWrapping + texture.repeat para el tiling final.\n8) Material: MeshStandardMaterial con map/normalMap/normalScale/roughnessMap/aoMap + metalness escalar; sumar un envMap (IBL via RGBELoader) si no, la roughness/metalness casi no se ven. Subir a MeshPhysicalMaterial solo para acabados especiales (clearcoat, sheen, transmission).\n\nReutiliza codigo de cpetry/NormalMap-Online (MIT, WebGL client-side) para el paso de normal map. Si en algun momento se necesita calidad claramente superior y se acepta un paso offline, ofrecer Materialize (GPL3) o laigter como pre-proceso de escritorio.\n\nCalidad esperada: convincente para superficies organicas/estocasticas donde brillo ~ relieve (piedra, tela, madera, corteza, asfalto, hormigon). Mediocre cuando el color no corresponde a altura (logos, manchas planas, patrones con estructura fuerte que ademas tilean mal). Clave del producto: exponer sliders (normalScale, roughness base e intensidad, invert, tiling) porque el usuario casi siempre tiene que afinar a ojo. Performance: hacer las derivaciones en GPU (WebGL/WebGLRenderTarget) en vez de getImageData en CPU para que sea instantaneo incluso a 2K-4K."
+    }
+  }
+}
