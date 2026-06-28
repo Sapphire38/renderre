@@ -3,9 +3,20 @@
 import { useEffect } from "react";
 import { useEditor } from "@/lib/store";
 import { buildScene } from "@/lib/ai-build";
-import { saveProject, loadProject, listProjects } from "@/lib/storage";
+import { saveProject, loadProject, listProjects, deleteProject } from "@/lib/storage";
 import type { SceneSpec } from "@/lib/ai-parse";
-import type { ComponentKind, Furniture, FurnitureComponent, FurnitureKind, OpeningKind, Vec2, Wall } from "@/lib/types";
+import type {
+  ComponentKind,
+  Furniture,
+  FurnitureComponent,
+  FurnitureKind,
+  Opening,
+  OpeningKind,
+  SelRef,
+  ToolId,
+  Vec2,
+  Wall,
+} from "@/lib/types";
 
 type Args = Record<string, unknown>;
 
@@ -50,19 +61,32 @@ function snapshot() {
       openings: s.openings.length,
       floors: s.floors.length,
     },
-    walls: s.walls.map((w) => ({ id: w.id, a: w.a, b: w.b, thickness: w.thickness, height: w.height, level: w.level ?? 0 })),
+    walls: s.walls.map((w) => ({ id: w.id, name: w.name, a: w.a, b: w.b, thickness: w.thickness, height: w.height, materialId: w.materialId, level: w.level ?? 0 })),
     furniture: s.furniture.map((f) => ({
       id: f.id, kind: f.kind, name: f.name, pos: f.pos, rotDeg: f.rotDeg,
-      width: f.width, depth: f.depth, height: f.height, color: f.color, level: f.level ?? 0,
+      width: f.width, depth: f.depth, height: f.height, panel: f.panel, doors: f.doors, shelves: f.shelves,
+      baseHeight: f.baseHeight, color: f.color, materialId: f.materialId, level: f.level ?? 0,
       custom: f.kind === "custom",
     })),
-    openings: s.openings.map((o) => ({ id: o.id, wallId: o.wallId, kind: o.kind, offset: o.offset, width: o.width, height: o.height, sill: o.sill, level: o.level ?? 0 })),
-    materials: s.materials.map((m) => ({ id: m.id, name: m.name })),
+    openings: s.openings.map((o) => ({ id: o.id, wallId: o.wallId, kind: o.kind, style: o.style, hinge: o.hinge, swing: o.swing, name: o.name, offset: o.offset, width: o.width, height: o.height, sill: o.sill, level: o.level ?? 0 })),
+    materials: s.materials.map((m) => ({ id: m.id, name: m.name, color: m.color, tileM: m.tileM, roughness: m.roughness, metalness: m.metalness })),
     floorMaterialId: s.floorMaterialId,
     customLibrary: s.customLibrary.map((f) => ({ id: f.id, name: f.name })),
     selection: s.selection,
+    multi: s.multi,
+    tool: s.tool,
+    furnitureKind: s.furnitureKind,
+    openingKind: s.openingKind,
+    openingStyle: s.openingStyle,
+    grid: s.grid,
+    wallDefaults: s.wallDefaults,
+    // Proyecto completo (para exportar/llevar a otra PC vía renderre_export_project)
+    project: s.exportData(),
     // --- Taller de muebles (si está abierto) ---
     workbenchOpen: s.workbenchOpen,
+    workbenchDims: s.workbenchDims,
+    draftCanUndo: s.draftPast.length > 0,
+    draftCanRedo: s.draftFuture.length > 0,
     selectedComponentId: s.selectedComponentId,
     draft: s.draft
       ? {
@@ -149,11 +173,12 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       const pos = vec(args.pos) ?? { x: num(args.x) ?? 0, z: num(args.z) ?? 0 };
       const id = st.addFurniture(kind, pos, num(args.rotDeg) ?? 0);
       const patch: Record<string, number | string> = {};
-      for (const k of ["width", "depth", "height", "doors", "shelves", "baseHeight"] as const) {
+      for (const k of ["width", "depth", "height", "panel", "doors", "shelves", "baseHeight"] as const) {
         if (args[k] !== undefined) patch[k] = num(args[k])!;
       }
       if (typeof args.color === "string") patch.color = args.color;
       if (typeof args.name === "string") patch.name = args.name;
+      if (typeof args.materialId === "string") patch.materialId = args.materialId;
       if (Object.keys(patch).length) st.updateFurniture(id, patch);
       break;
     }
@@ -167,9 +192,10 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       const len = Math.hypot(wall.b.x - wall.a.x, wall.b.z - wall.a.z);
       const offset = num(args.offset) ?? len / 2;
       const id = st.addOpening(wallId, (String(args.kind ?? "door") as OpeningKind), offset);
-      const patch: Record<string, number> = {};
+      const patch: Record<string, unknown> = {};
       for (const k of ["width", "height", "sill"] as const) if (args[k] !== undefined) patch[k] = num(args[k])!;
-      if (id && Object.keys(patch).length) st.updateOpening(id, patch);
+      for (const k of ["style", "hinge", "swing", "name"] as const) if (typeof args[k] === "string") patch[k] = args[k];
+      if (id && Object.keys(patch).length) st.updateOpening(id, patch as Partial<Omit<Opening, "id">>);
       break;
     }
     case "apply_scene": {
@@ -202,7 +228,7 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       if (!f) break;
       const patch: Record<string, unknown> = {};
       if (args.x !== undefined || args.z !== undefined) patch.pos = { x: num(args.x) ?? f.pos.x, z: num(args.z) ?? f.pos.z };
-      for (const k of ["rotDeg", "width", "depth", "height", "doors", "shelves", "baseHeight"] as const) {
+      for (const k of ["rotDeg", "width", "depth", "height", "panel", "doors", "shelves", "baseHeight"] as const) {
         if (args[k] !== undefined) patch[k] = num(args[k]);
       }
       if (typeof args.color === "string") patch.color = args.color;
@@ -215,8 +241,22 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       const id = String(args.id ?? "");
       const patch: Record<string, unknown> = {};
       for (const k of ["thickness", "height"] as const) if (args[k] !== undefined) patch[k] = num(args[k]);
+      const a = vec(args.a);
+      const b = vec(args.b);
+      if (a) patch.a = a;
+      if (b) patch.b = b;
+      if (typeof args.name === "string") patch.name = args.name;
       if ("materialId" in args) patch.materialId = args.materialId == null ? undefined : String(args.materialId);
       st.updateWall(id, patch as Partial<Omit<Wall, "id">>);
+      break;
+    }
+    case "update_opening": {
+      const id = String(args.id ?? "");
+      if (!useEditor.getState().openings.some((o) => o.id === id)) break;
+      const patch: Record<string, unknown> = {};
+      for (const k of ["offset", "width", "height", "sill"] as const) if (args[k] !== undefined) patch[k] = num(args[k]);
+      for (const k of ["kind", "style", "hinge", "swing", "name"] as const) if (typeof args[k] === "string") patch[k] = args[k];
+      st.updateOpening(id, patch as Partial<Omit<Opening, "id">>);
       break;
     }
     case "delete": {
@@ -241,6 +281,17 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
 
     // --- Taller de muebles a medida ---
     case "open_workbench": {
+      if (typeof args.preset === "string") {
+        st.openWorkbenchFromPreset(args.preset as FurnitureKind);
+        break;
+      }
+      if (typeof args.libId === "string" || typeof args.libName === "string") {
+        const lib = useEditor.getState().customLibrary;
+        const f = typeof args.libId === "string" ? lib.find((x) => x.id === args.libId) : lib.find((x) => x.name === args.libName);
+        if (f) st.loadDraft(f);
+        else st.pushToast("No encontré ese mueble guardado", "warn");
+        break;
+      }
       const baseId = typeof args.baseId === "string" ? args.baseId : undefined;
       const base = baseId ? useEditor.getState().furniture.find((f) => f.id === baseId) : undefined;
       st.openWorkbench(base ?? undefined);
@@ -283,6 +334,153 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
     }
     case "save_draft":
       st.saveDraftToPlan();
+      break;
+    case "undo_draft":
+      st.undoDraft();
+      break;
+    case "redo_draft":
+      st.redoDraft();
+      break;
+    case "duplicate_component":
+      if (typeof args.id === "string") st.selectComponent(args.id);
+      st.duplicateComponent();
+      break;
+    case "nudge_component":
+      st.nudgeComponent(num(args.dx) ?? 0, num(args.dy) ?? 0);
+      break;
+    case "copy_component":
+      if (typeof args.id === "string") st.selectComponent(args.id);
+      st.copyComponent();
+      break;
+    case "paste_component":
+      st.pasteComponent();
+      break;
+    case "toggle_dims":
+      st.toggleWorkbenchDims();
+      break;
+
+    // --- pisos / niveles ---
+    case "rename_floor":
+      st.renameFloor(num(args.level) ?? st.activeLevel, String(args.name ?? ""));
+      break;
+    case "set_floor_elevation":
+      st.setFloorElevation(num(args.level) ?? st.activeLevel, num(args.elevation) ?? 0);
+      break;
+    case "remove_floor":
+      st.removeFloor(num(args.level) ?? st.activeLevel);
+      break;
+
+    // --- materiales ---
+    case "add_material": {
+      const id = st.addMaterial({
+        name: String(args.name ?? "Material"),
+        color: typeof args.color === "string" ? args.color : "#c9b18b",
+        tileM: num(args.tileM) ?? 1,
+        roughness: num(args.roughness) ?? 0.85,
+        metalness: num(args.metalness) ?? 0,
+      });
+      st.pushToast(`Material creado: ${id}`, "ok");
+      break;
+    }
+    case "update_material": {
+      const id = String(args.id ?? "");
+      if (!id) break;
+      const patch: Record<string, unknown> = {};
+      if (typeof args.name === "string") patch.name = args.name;
+      if (typeof args.color === "string") patch.color = args.color;
+      for (const k of ["tileM", "roughness", "metalness"] as const) if (args[k] !== undefined) patch[k] = num(args[k]);
+      st.updateMaterial(id, patch);
+      break;
+    }
+
+    // --- biblioteca custom ---
+    case "remove_from_library": {
+      const lib = useEditor.getState().customLibrary;
+      const libId = typeof args.libId === "string" ? args.libId : lib.find((f) => f.name === args.name)?.id;
+      if (libId) st.removeFromLibrary(libId);
+      break;
+    }
+
+    // --- selección y operaciones de grupo ---
+    case "select": {
+      const kind = String(args.kind ?? "");
+      const id = String(args.id ?? "");
+      if (kind === "wall") st.selectWall(id);
+      else if (kind === "furniture") st.selectFurniture(id);
+      else if (kind === "opening") st.selectOpening(id);
+      break;
+    }
+    case "set_multi": {
+      const refs = Array.isArray(args.refs)
+        ? (args.refs as unknown[])
+            .map((r) => (r && typeof r === "object" ? (r as Record<string, unknown>) : null))
+            .filter((r): r is Record<string, unknown> => !!r && typeof r.kind === "string" && typeof r.id === "string")
+            .map((r) => ({ kind: r.kind, id: r.id }) as SelRef)
+        : [];
+      st.setMulti(refs);
+      break;
+    }
+    case "clear_selection":
+      st.clearSelection();
+      break;
+    case "copy_selection":
+      st.copySelection();
+      break;
+    case "paste":
+      st.paste();
+      window.dispatchEvent(new CustomEvent("renderre:fit"));
+      break;
+    case "nudge_selection":
+      st.nudgeSelection(num(args.dx) ?? 0, num(args.dz) ?? 0);
+      break;
+    case "remove_selected":
+      st.removeSelected();
+      break;
+    case "assign_material_to_selection":
+      st.assignMaterialToSelection(args.materialId == null ? null : String(args.materialId));
+      break;
+
+    // --- proyectos / ajustes ---
+    case "delete_project": {
+      const name = String(args.name ?? "").trim();
+      if (name) {
+        deleteProject(name);
+        st.pushToast(`Proyecto eliminado: ${name}`, "ok");
+      }
+      break;
+    }
+    case "set_project_name":
+      st.setProjectName(String(args.name ?? ""));
+      break;
+    case "set_grid": {
+      const patch: Record<string, unknown> = {};
+      if (args.cellM !== undefined) patch.cellM = num(args.cellM);
+      if (typeof args.snap === "boolean") patch.snap = args.snap;
+      if (typeof args.showGrid === "boolean") patch.showGrid = args.showGrid;
+      st.setGrid(patch);
+      break;
+    }
+    case "set_wall_defaults": {
+      const patch: Record<string, unknown> = {};
+      if (args.thickness !== undefined) patch.thickness = num(args.thickness);
+      if (args.height !== undefined) patch.height = num(args.height);
+      st.setWallDefaults(patch);
+      break;
+    }
+    case "set_tool":
+      st.setTool(String(args.tool ?? "select") as ToolId);
+      break;
+    case "set_furniture_kind":
+      st.setFurnitureKind(String(args.kind ?? "module") as FurnitureKind);
+      break;
+    case "set_opening_kind":
+      st.setOpeningKind(String(args.kind ?? "door") as OpeningKind);
+      break;
+    case "set_opening_style":
+      st.setOpeningStyle(String(args.style ?? "swing"));
+      break;
+    case "export_png":
+      window.dispatchEvent(new CustomEvent("renderre:exportpng"));
       break;
 
     default:

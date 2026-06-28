@@ -96,10 +96,17 @@ const TOOLS = [
       "Genera una escena (muros, aberturas, muebles) a partir de una descripción en lenguaje natural en español, usando la IA del proyecto. Se SUMA a lo que ya hay. Ej: 'cocina de 4x3 con bajo mesada, mesada y alacena'.",
     inputSchema: {
       type: "object",
-      properties: { description: { ...str, description: "Descripción del espacio/mueble a generar" } },
+      properties: {
+        description: { ...str, description: "Descripción del espacio/mueble a generar" },
+        images: { type: "array", items: str, description: "Opcional: imágenes como data URLs (data:image/...) para lectura por visión" },
+      },
       required: ["description"],
     },
-    handler: (a) => runCommand("generate", { description: String(a.description || "") }, "Generar"),
+    handler: (a) => {
+      const payload = { description: String(a.description || "") };
+      if (Array.isArray(a.images) && a.images.length) payload.images = a.images;
+      return runCommand("generate", payload, "Generar");
+    },
   },
   {
     name: "renderre_apply_scene",
@@ -146,7 +153,7 @@ const TOOLS = [
       type: "object",
       properties: {
         kind: { enum: FURNITURE_KINDS }, x: num, z: num, rotDeg: num,
-        width: num, depth: num, height: num, doors: num, shelves: num, baseHeight: num, color: str, name: str,
+        width: num, depth: num, height: num, panel: num, doors: num, shelves: num, baseHeight: num, color: str, name: str, materialId: str,
       },
       required: ["kind", "x", "z"],
     },
@@ -155,15 +162,30 @@ const TOOLS = [
   {
     name: "renderre_add_opening",
     description:
-      "Agrega una puerta o ventana sobre un muro. Indicá wallIndex (índice en la lista de muros que da get_state) o wallId. offset = distancia desde el extremo A (por defecto, centro).",
+      "Agrega una puerta o ventana sobre un muro. Indicá wallIndex (índice en la lista de muros de get_state) o wallId. offset = distancia desde el extremo A (def: centro). Podés fijar estilo (puerta: swing|double|sliding; ventana: fixed|sliding|casement), bisagra y lado de apertura.",
     inputSchema: {
       type: "object",
       properties: {
         wallIndex: num, wallId: str, kind: { enum: ["door", "window"] }, offset: num, width: num, height: num, sill: num,
+        style: str, hinge: { enum: ["left", "right"] }, swing: { enum: ["in", "out"] }, name: str,
       },
       required: ["kind"],
     },
     handler: (a) => runCommand("add_opening", a, "Agregar abertura"),
+  },
+  {
+    name: "renderre_update_opening",
+    description:
+      "Edita una abertura existente por id (de get_state.openings): tipo (door/window), estilo, bisagra, lado de apertura, ancho/alto/antepecho, posición (offset) y nombre.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: str, kind: { enum: ["door", "window"] }, style: str, hinge: { enum: ["left", "right"] }, swing: { enum: ["in", "out"] },
+        offset: num, width: num, height: num, sill: num, name: str,
+      },
+      required: ["id"],
+    },
+    handler: (a) => runCommand("update_opening", a, "Editar abertura"),
   },
   {
     name: "renderre_add_floor",
@@ -249,7 +271,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        id: str, x: num, z: num, rotDeg: num, width: num, depth: num, height: num,
+        id: str, x: num, z: num, rotDeg: num, width: num, depth: num, height: num, panel: num,
         doors: num, shelves: num, baseHeight: num, color: str, name: str, materialId: str,
       },
       required: ["id"],
@@ -258,8 +280,9 @@ const TOOLS = [
   },
   {
     name: "renderre_update_wall",
-    description: "Edita un muro existente por id: espesor, alto o material (materialId; null para quitarlo).",
-    inputSchema: { type: "object", properties: { id: str, thickness: num, height: num, materialId: str }, required: ["id"] },
+    description:
+      "Edita un muro existente por id: mover sus extremos a/b ([x,z], cambia largo/ángulo/posición), espesor, alto, nombre o material (materialId; null para quitarlo).",
+    inputSchema: { type: "object", properties: { id: str, a: vec2, b: vec2, thickness: num, height: num, name: str, materialId: str }, required: ["id"] },
     handler: (a) => runCommand("update_wall", a, "Editar muro"),
   },
   {
@@ -285,8 +308,8 @@ const TOOLS = [
   {
     name: "renderre_open_workbench",
     description:
-      "Abre el Taller para diseñar un mueble MDF a medida. Opcional baseId: editar una copia de un mueble existente. Después usá add_component y save_draft.",
-    inputSchema: { type: "object", properties: { baseId: str } },
+      "Abre el Taller para diseñar un mueble MDF a medida. Opciones: `preset` (arranca desde un preset MDF: module|cabinet-base|cabinet-wall|shelf|countertop|wardrobe|table|tv-stand|nightstand|desk con estantes/puertas como componentes), `libId`/`libName` (editar uno de mis muebles guardados), o `baseId` (editar una copia de un mueble del plano). Sin nada: arranca en blanco.",
+    inputSchema: { type: "object", properties: { preset: { enum: FURNITURE_KINDS }, libId: str, libName: str, baseId: str } },
     handler: (a) => runCommand("open_workbench", a, "Abrir taller"),
   },
   {
@@ -324,6 +347,182 @@ const TOOLS = [
     description: "Cierra el Taller sin guardar el mueble en edición.",
     inputSchema: { type: "object", properties: {} },
     handler: () => runCommand("close_workbench", {}, "Cerrar taller"),
+  },
+  // ---- Taller: historial, portapapeles y cotas ----
+  {
+    name: "renderre_undo_draft",
+    description: "Deshace el último cambio DENTRO del Taller (historial del mueble en edición).",
+    inputSchema: { type: "object", properties: {} },
+    handler: () => runCommand("undo_draft", {}, "Deshacer (taller)"),
+  },
+  {
+    name: "renderre_redo_draft",
+    description: "Rehace el último cambio deshecho dentro del Taller.",
+    inputSchema: { type: "object", properties: {} },
+    handler: () => runCommand("redo_draft", {}, "Rehacer (taller)"),
+  },
+  {
+    name: "renderre_duplicate_component",
+    description: "Duplica un componente del mueble en edición (por id, o el seleccionado).",
+    inputSchema: { type: "object", properties: { id: str } },
+    handler: (a) => runCommand("duplicate_component", a, "Duplicar componente"),
+  },
+  {
+    name: "renderre_nudge_component",
+    description: "Mueve un poco el componente seleccionado del Taller (dx, dy en metros, relativo).",
+    inputSchema: { type: "object", properties: { dx: num, dy: num } },
+    handler: (a) => runCommand("nudge_component", a, "Mover componente"),
+  },
+  {
+    name: "renderre_toggle_dims",
+    description: "Muestra/oculta las cotas en el alzado del Taller.",
+    inputSchema: { type: "object", properties: {} },
+    handler: () => runCommand("toggle_dims", {}, "Cotas"),
+  },
+  // ---- pisos / niveles ----
+  {
+    name: "renderre_rename_floor",
+    description: "Renombra un piso/nivel (level 0 = planta baja; omitido = activo).",
+    inputSchema: { type: "object", properties: { level: num, name: str }, required: ["name"] },
+    handler: (a) => runCommand("rename_floor", a, "Renombrar piso"),
+  },
+  {
+    name: "renderre_set_floor_elevation",
+    description: "Cambia la elevación/altura de arranque (m) de un piso (level omitido = activo).",
+    inputSchema: { type: "object", properties: { level: num, elevation: num }, required: ["elevation"] },
+    handler: (a) => runCommand("set_floor_elevation", a, "Elevación de piso"),
+  },
+  {
+    name: "renderre_remove_floor",
+    description: "Elimina un piso (level omitido = activo). Reindexa los elementos; debe quedar al menos uno.",
+    inputSchema: { type: "object", properties: { level: num } },
+    handler: (a) => runCommand("remove_floor", a, "Eliminar piso"),
+  },
+  // ---- materiales ----
+  {
+    name: "renderre_add_material",
+    description: "Crea un material de color sólido (luego asignalo por id con update_furniture/update_wall/set_floor_material). tileM=metros por repetición, roughness/metalness 0..1.",
+    inputSchema: { type: "object", properties: { name: str, color: str, tileM: num, roughness: num, metalness: num }, required: ["name", "color"] },
+    handler: (a) => runCommand("add_material", a, "Crear material"),
+  },
+  {
+    name: "renderre_update_material",
+    description: "Edita un material existente por id (nombre, color, tileM, roughness, metalness).",
+    inputSchema: { type: "object", properties: { id: str, name: str, color: str, tileM: num, roughness: num, metalness: num }, required: ["id"] },
+    handler: (a) => runCommand("update_material", a, "Editar material"),
+  },
+  // ---- biblioteca custom ----
+  {
+    name: "renderre_remove_from_library",
+    description: "Quita un mueble guardado de la biblioteca (por libId o name de get_state.customLibrary).",
+    inputSchema: { type: "object", properties: { libId: str, name: str } },
+    handler: (a) => runCommand("remove_from_library", a, "Quitar de biblioteca"),
+  },
+  // ---- selección y operaciones de grupo ----
+  {
+    name: "renderre_select",
+    description: "Selecciona un elemento por id. kind: wall | furniture | opening.",
+    inputSchema: { type: "object", properties: { kind: { enum: ["wall", "furniture", "opening"] }, id: str }, required: ["kind", "id"] },
+    handler: (a) => runCommand("select", a, "Seleccionar"),
+  },
+  {
+    name: "renderre_set_multi",
+    description: "Fija una selección múltiple. refs = lista de { kind, id }.",
+    inputSchema: {
+      type: "object",
+      properties: { refs: { type: "array", items: { type: "object", properties: { kind: { enum: ["wall", "furniture", "opening"] }, id: str }, required: ["kind", "id"] } } },
+      required: ["refs"],
+    },
+    handler: (a) => runCommand("set_multi", a, "Selección múltiple"),
+  },
+  {
+    name: "renderre_clear_selection",
+    description: "Limpia la selección.",
+    inputSchema: { type: "object", properties: {} },
+    handler: () => runCommand("clear_selection", {}, "Limpiar selección"),
+  },
+  {
+    name: "renderre_copy_selection",
+    description: "Copia la selección actual al portapapeles.",
+    inputSchema: { type: "object", properties: {} },
+    handler: () => runCommand("copy_selection", {}, "Copiar"),
+  },
+  {
+    name: "renderre_paste",
+    description: "Pega lo copiado (con un pequeño offset).",
+    inputSchema: { type: "object", properties: {} },
+    handler: () => runCommand("paste", {}, "Pegar"),
+  },
+  {
+    name: "renderre_nudge_selection",
+    description: "Mueve la selección por un delta (dx, dz en metros).",
+    inputSchema: { type: "object", properties: { dx: num, dz: num } },
+    handler: (a) => runCommand("nudge_selection", a, "Mover selección"),
+  },
+  {
+    name: "renderre_remove_selected",
+    description: "Elimina la selección actual (uno o varios elementos).",
+    inputSchema: { type: "object", properties: {} },
+    handler: () => runCommand("remove_selected", {}, "Eliminar selección"),
+  },
+  {
+    name: "renderre_assign_material_to_selection",
+    description: "Asigna un material a toda la selección (materialId; omitir/null para quitar).",
+    inputSchema: { type: "object", properties: { materialId: str } },
+    handler: (a) => runCommand("assign_material_to_selection", a, "Material a selección"),
+  },
+  // ---- proyectos / ajustes / exportar ----
+  {
+    name: "renderre_delete_project",
+    description: "Elimina un proyecto guardado por nombre (del navegador del usuario).",
+    inputSchema: { type: "object", properties: { name: str }, required: ["name"] },
+    handler: (a) => runCommand("delete_project", a, "Eliminar proyecto"),
+  },
+  {
+    name: "renderre_set_project_name",
+    description: "Cambia el nombre del proyecto actual (sin guardar).",
+    inputSchema: { type: "object", properties: { name: str }, required: ["name"] },
+    handler: (a) => runCommand("set_project_name", a, "Renombrar proyecto"),
+  },
+  {
+    name: "renderre_set_grid",
+    description: "Configura la cuadrícula: cellM (m por celda), snap (imantar), showGrid (mostrar).",
+    inputSchema: { type: "object", properties: { cellM: num, snap: bool, showGrid: bool } },
+    handler: (a) => runCommand("set_grid", a, "Cuadrícula"),
+  },
+  {
+    name: "renderre_set_wall_defaults",
+    description: "Cambia los valores por defecto de los muros nuevos (thickness, height en m).",
+    inputSchema: { type: "object", properties: { thickness: num, height: num } },
+    handler: (a) => runCommand("set_wall_defaults", a, "Defaults de muro"),
+  },
+  {
+    name: "renderre_set_tool",
+    description: "Cambia la herramienta activa del editor: select | wall | pan | furniture | opening.",
+    inputSchema: { type: "object", properties: { tool: { enum: ["select", "wall", "pan", "furniture", "opening"] } }, required: ["tool"] },
+    handler: (a) => runCommand("set_tool", a, "Herramienta"),
+  },
+  {
+    name: "renderre_export_png",
+    description: "Descarga la vista 3D actual como PNG (en el navegador del usuario).",
+    inputSchema: { type: "object", properties: {} },
+    handler: () => runCommand("export_png", {}, "Exportar PNG"),
+  },
+  {
+    name: "renderre_export_project",
+    description: "Devuelve el proyecto actual como JSON (ProjectData) para guardarlo en disco / llevarlo a otra PC.",
+    inputSchema: { type: "object", properties: {} },
+    handler: async () => {
+      let s;
+      try {
+        s = await getState();
+      } catch (e) {
+        return errorText(`No pude contactar a Renderre en ${BASE}. ¿Está corriendo (npm run dev)?\n${e.message}`);
+      }
+      if (!s.connected || !s.state) return okText(`El editor no está abierto. ${editorHint}`);
+      const payload = { app: "renderre", name: s.state.projectName, exportedAt: s.ts, data: s.state.project };
+      return okText(JSON.stringify(payload, null, 2));
+    },
   },
 ];
 

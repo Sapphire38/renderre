@@ -372,6 +372,13 @@ export default function Scene3D({
     else document.exitFullscreen?.();
   };
 
+  // Exportar PNG por evento (lo dispara el MCP vía renderre_export_png).
+  useEffect(() => {
+    const onExport = () => exportPng();
+    window.addEventListener("renderre:exportpng", onExport);
+    return () => window.removeEventListener("renderre:exportpng", onExport);
+  }, []);
+
   // Escape para salir del modo agrandado.
   useEffect(() => {
     if (!big) return;
