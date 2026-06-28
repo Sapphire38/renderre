@@ -76,6 +76,8 @@ export default function FrontElevationEditor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sizeRef = useRef({ w: 0, h: 0 });
   const gestureRef = useRef<Gesture | null>(null);
+  // Líneas-guía activas durante un arrastre (coordenadas en metros).
+  const guidesRef = useRef<{ x: number[]; y: number[] }>({ x: [], y: [] });
 
   const draft = useEditor((s) => s.draft);
   const selectedId = useEditor((s) => s.selectedComponentId);
@@ -103,6 +105,20 @@ export default function FrontElevationEditor() {
     tl: { x: c.x, y: c.y + c.h },
     tr: { x: c.x + c.w, y: c.y + c.h },
   });
+
+  // Imanta un conjunto de "anclas" móviles (bordes/centro) a las líneas objetivo
+  // (marco del mueble + bordes/centros de los demás componentes). Devuelve el
+  // desplazamiento a aplicar y la línea sobre la que imantó (para dibujar la guía).
+  const snapAxis = (movers: number[], targets: number[], thr: number): { delta: number; at: number } | null => {
+    let best: { delta: number; at: number } | null = null;
+    for (const m of movers) {
+      for (const tv of targets) {
+        const d = tv - m;
+        if (Math.abs(d) <= thr && (!best || Math.abs(d) < Math.abs(best.delta))) best = { delta: d, at: tv };
+      }
+    }
+    return best;
+  };
 
   const draw = () => {
     const canvas = canvasRef.current;
@@ -186,6 +202,28 @@ export default function FrontElevationEditor() {
           ctx.strokeRect(hx - 4, hy - 4, 8, 8);
         }
       }
+    }
+
+    // líneas-guía de alineación (mientras se arrastra)
+    const guides = guidesRef.current;
+    if (guides.x.length || guides.y.length) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(244,114,182,0.9)"; // rosa
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      for (const gx of guides.x) {
+        const px = sx(gx, t);
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, h);
+      }
+      for (const gy of guides.y) {
+        const py = sy(gy, t);
+        ctx.moveTo(0, py);
+        ctx.lineTo(w, py);
+      }
+      ctx.stroke();
+      ctx.restore();
     }
 
     if (!showDims) return;
@@ -318,17 +356,36 @@ export default function FrontElevationEditor() {
       g.committed = true;
     }
 
+    const t = tf();
+    const thr = 7 / t.scale; // 7px en metros
+    const others = (draft.components ?? []).filter((x) => x.id !== g.id);
+    const targX = [0, W / 2, W, ...others.flatMap((o) => [o.x, o.x + o.w / 2, o.x + o.w])];
+    const targY = [0, H / 2, H, ...others.flatMap((o) => [o.y, o.y + o.h / 2, o.y + o.h])];
+    const guides: { x: number[]; y: number[] } = { x: [], y: [] };
+
     if (g.mode === "move") {
-      const nx = clamp(snap(g.ox + (mx - g.startFx)), 0, W - c.w);
-      const ny = clamp(snap(g.oy + (my - g.startFy)), 0, H - c.h);
+      let nx = g.ox + (mx - g.startFx);
+      let ny = g.oy + (my - g.startFy);
+      const snX = snapAxis([nx, nx + c.w / 2, nx + c.w], targX, thr);
+      const snY = snapAxis([ny, ny + c.h / 2, ny + c.h], targY, thr);
+      if (snX) { nx += snX.delta; guides.x.push(snX.at); } else nx = snap(nx);
+      if (snY) { ny += snY.delta; guides.y.push(snY.at); } else ny = snap(ny);
+      nx = clamp(nx, 0, W - c.w);
+      ny = clamp(ny, 0, H - c.h);
+      guidesRef.current = guides;
       st.updateComponent(g.id, { x: nx, y: ny });
     } else {
-      const px2 = clamp(snap(mx), 0, W);
-      const py2 = clamp(snap(my), 0, H);
+      let px2 = clamp(mx, 0, W);
+      let py2 = clamp(my, 0, H);
+      const snX = snapAxis([px2], targX, thr);
+      const snY = snapAxis([py2], targY, thr);
+      if (snX) { px2 += snX.delta; guides.x.push(snX.at); } else px2 = snap(px2);
+      if (snY) { py2 += snY.delta; guides.y.push(snY.at); } else py2 = snap(py2);
       const x = Math.min(g.ax, px2);
       const w = Math.max(0.02, Math.abs(g.ax - px2));
       const y = Math.min(g.ay, py2);
       const h = Math.max(0.02, Math.abs(g.ay - py2));
+      guidesRef.current = guides;
       st.updateComponent(g.id, { x, y, w, h });
     }
   };
@@ -339,6 +396,8 @@ export default function FrontElevationEditor() {
       if (cv && cv.hasPointerCapture(e.pointerId)) cv.releasePointerCapture(e.pointerId);
     } catch {}
     gestureRef.current = null;
+    guidesRef.current = { x: [], y: [] };
+    draw();
   };
 
   return (

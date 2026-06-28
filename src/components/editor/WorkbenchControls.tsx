@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { useEditor } from "@/lib/store";
 import { FURNITURE_PRESETS } from "@/lib/furniture";
+import { uid } from "@/lib/geometry";
 import type { ComponentKind, FurnitureComponent } from "@/lib/types";
 import { TrashIcon, CopyIcon } from "./icons";
 
@@ -63,10 +65,33 @@ function CompProps({ c }: { c: FurnitureComponent }) {
   const update = useEditor((s) => s.updateComponent);
   const remove = useEditor((s) => s.removeComponent);
   const duplicate = useEditor((s) => s.duplicateComponent);
+  const draft = useEditor((s) => s.draft);
+  const updateDraft = useEditor((s) => s.updateDraft);
   const draftColor = useEditor((s) => s.draft?.color);
   const draftDepth = useEditor((s) => s.draft?.depth ?? 0.5);
   const draftPanel = useEditor((s) => s.draft?.panel ?? 0.018);
   const materials = useEditor((s) => s.materials);
+  const [nCopies, setNCopies] = useState(3);
+
+  // Distribuye N copias del componente equiespaciadas en el interior del mueble.
+  const distribute = (n: number, axis: "x" | "y") => {
+    if (!draft) return;
+    beginEdit();
+    const t = draft.panel;
+    const others = (draft.components ?? []).filter((x) => x.id !== c.id);
+    const items: FurnitureComponent[] = [];
+    for (let i = 1; i <= n; i++) {
+      const f = i / (n + 1);
+      if (axis === "x") {
+        const center = t + (draft.width - 2 * t) * f;
+        items.push({ ...c, id: uid(), x: clamp(center - c.w / 2, 0, draft.width - c.w) });
+      } else {
+        const center = t + (draft.height - 2 * t) * f;
+        items.push({ ...c, id: uid(), y: clamp(center - c.h / 2, 0, draft.height - c.h) });
+      }
+    }
+    updateDraft({ components: [...others, ...items] });
+  };
   const set = (p: Partial<FurnitureComponent>) => update(c.id, p);
   // para controles de un solo clic (chips de material): snapshot + aplicar
   const setStep = (p: Partial<FurnitureComponent>) => {
@@ -235,6 +260,39 @@ function CompProps({ c }: { c: FurnitureComponent }) {
           />
         </label>
       )}
+
+      <div className="mt-3 rounded-md border border-neutral-800 p-2">
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Distribuir copias</span>
+          <input
+            type="number"
+            min={2}
+            max={20}
+            value={nCopies}
+            onChange={(e) => setNCopies(clamp(Math.round(parseFloat(e.target.value) || 2), 2, 20))}
+            className="w-14 rounded border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-right text-sm text-neutral-100 outline-none focus:border-sky-600"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            onClick={() => distribute(nCopies, "x")}
+            title="N copias equiespaciadas en fila (horizontal)"
+            className="rounded-md border border-neutral-700 px-2 py-1.5 text-sm text-neutral-200 hover:border-sky-500 hover:bg-neutral-800"
+          >
+            ⇆ En fila
+          </button>
+          <button
+            type="button"
+            onClick={() => distribute(nCopies, "y")}
+            title="N copias equiespaciadas en columna (vertical) — ideal para estantes"
+            className="rounded-md border border-neutral-700 px-2 py-1.5 text-sm text-neutral-200 hover:border-sky-500 hover:bg-neutral-800"
+          >
+            ⇅ En columna
+          </button>
+        </div>
+        <p className="mt-1 text-[10px] leading-snug text-neutral-600">Reemplaza este componente por N iguales repartidos parejos.</p>
+      </div>
 
       <div className="mt-2 flex gap-2">
         <button
