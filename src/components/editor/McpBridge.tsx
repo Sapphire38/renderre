@@ -20,6 +20,14 @@ import type {
 
 type Args = Record<string, unknown>;
 
+/** Resultado de la última generación por IA (para que Claude lo lea por get_state). */
+let lastGenerate: {
+  source?: string;
+  imageUsed?: boolean;
+  analysis?: string;
+  created: { walls: number; furniture: number; openings: number };
+} | null = null;
+
 const vec = (p: unknown): Vec2 | null => {
   if (Array.isArray(p) && p.length >= 2) return { x: Number(p[0]), z: Number(p[1]) };
   if (p && typeof p === "object") {
@@ -80,6 +88,8 @@ function snapshot() {
     openingStyle: s.openingStyle,
     grid: s.grid,
     wallDefaults: s.wallDefaults,
+    // Resultado de la última generación por IA (qué entendió de la imagen + cuántos elementos creó)
+    lastGenerate,
     // Proyecto completo (para exportar/llevar a otra PC vía renderre_export_project)
     project: s.exportData(),
     // --- Taller de muebles (si está abierto) ---
@@ -127,6 +137,9 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       break;
     case "fit_view":
       window.dispatchEvent(new CustomEvent("renderre:fit"));
+      break;
+    case "fit_3d":
+      window.dispatchEvent(new CustomEvent("renderre:fit3d"));
       break;
     case "add_floor":
       st.addFloor();
@@ -218,6 +231,13 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       const built = buildScene(spec, useEditor.getState().wallDefaults);
       st.applyBatch(built.walls, built.furniture, built.openings);
       window.dispatchEvent(new CustomEvent("renderre:fit"));
+      lastGenerate = {
+        source: data.source,
+        imageUsed: !!data.imageUsed,
+        analysis: typeof data.analysis === "string" ? data.analysis : undefined,
+        created: { walls: built.walls.length, furniture: built.furniture.length, openings: built.openings.length },
+      };
+      st.pushToast(`IA: ${built.walls.length} muros · ${built.furniture.length} muebles · ${built.openings.length} aberturas`, "ok");
       break;
     }
 

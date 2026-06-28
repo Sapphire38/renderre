@@ -262,6 +262,12 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
     handler: () => runCommand("fit_view", {}, "Encuadrar"),
   },
+  {
+    name: "renderre_fit_view_3d",
+    description: "Encuadra la cámara de la vista 3D para ver todo el modelo.",
+    inputSchema: { type: "object", properties: {} },
+    handler: () => runCommand("fit_3d", {}, "Encuadrar 3D"),
+  },
 
   // ---- editar / borrar elementos existentes (usá los id de get_state) ----
   {

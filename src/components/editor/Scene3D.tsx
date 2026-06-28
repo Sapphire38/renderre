@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { Grid, OrbitControls } from "@react-three/drei";
 import { useEditor, selectedRefs } from "@/lib/store";
 import { carcassPanels, footprintCorners } from "@/lib/furniture";
@@ -242,6 +242,40 @@ function FloorSlab({
   );
 }
 
+/** Encuadra la cámara 3D para ver todo (lo dispara el MCP vía renderre_fit_view_3d). */
+function Fit3D() {
+  const camera = useThree((s) => s.camera);
+  const controls = useThree((s) => s.controls) as unknown as { target: THREE.Vector3; update: () => void } | undefined;
+  const walls = useEditor((s) => s.walls);
+  const furniture = useEditor((s) => s.furniture);
+  const floors = useEditor((s) => s.floors);
+  useEffect(() => {
+    const onFit = () => {
+      const elev = (lvl?: number) => floors[lvl ?? 0]?.elevation ?? 0;
+      let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity, maxY = 0, has = false;
+      const addXZ = (x: number, z: number) => {
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); has = true;
+      };
+      for (const w of walls) { addXZ(w.a.x, w.a.z); addXZ(w.b.x, w.b.z); maxY = Math.max(maxY, elev(w.level) + w.height); }
+      for (const f of furniture) { for (const p of footprintCorners(f)) addXZ(p.x, p.z); maxY = Math.max(maxY, elev(f.level) + f.baseHeight + f.height); }
+      if (!has) {
+        camera.position.set(9, 9, 12);
+        if (controls) { controls.target.set(0, 1, 0); controls.update(); } else camera.lookAt(0, 1, 0);
+        return;
+      }
+      const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2, cy = Math.max(maxY, 1) / 2;
+      const size = Math.max(maxX - minX, maxZ - minZ, maxY, 1);
+      const dist = size * 1.5 + 3;
+      camera.position.set(cx + dist * 0.7, cy + dist * 0.7, cz + dist);
+      if (controls) { controls.target.set(cx, cy, cz); controls.update(); } else camera.lookAt(cx, cy, cz);
+    };
+    window.addEventListener("renderre:fit3d", onFit);
+    return () => window.removeEventListener("renderre:fit3d", onFit);
+  }, [walls, furniture, floors, camera, controls]);
+  return null;
+}
+
 function Scene() {
   const walls = useEditor((s) => s.walls);
   const furniture = useEditor((s) => s.furniture);
@@ -329,6 +363,8 @@ function Scene() {
           yOffset={elevOf(f.level)}
         />
       ))}
+
+      <Fit3D />
 
       <OrbitControls
         makeDefault
