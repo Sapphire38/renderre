@@ -49,6 +49,7 @@ function componentPatch(args: Args): Partial<FurnitureComponent> {
   }
   if (typeof args.hinge === "string") p.hinge = args.hinge;
   if (typeof args.orient === "string") p.orient = args.orient;
+  if (typeof args.shape === "string") p.shape = args.shape;
   if (typeof args.color === "string") p.color = args.color;
   if ("materialId" in args) p.materialId = args.materialId == null ? undefined : String(args.materialId);
   return p as Partial<FurnitureComponent>;

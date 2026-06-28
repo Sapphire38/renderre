@@ -123,6 +123,8 @@ export type FurnitureComponent = {
   count?: number; // cajones apilados / hojas corredizas
   hinge?: "left" | "right"; // puerta batiente
   orient?: "front" | "horizontal" | "vertical"; // placa libre
+  /** Placa: forma 3D. "box" (default) o una primitiva (cilindro/esfera/cono/pirámide/cuña). */
+  shape?: "box" | "cylinder" | "sphere" | "cone" | "pyramid" | "wedge";
   /** Profundidad propia del componente en el eje Z (m). Si falta, ocupa casi toda la del mueble. */
   depth?: number;
   /** Retiro en profundidad: distancia desde el frente del mueble (m). Si falta, va centrado. */

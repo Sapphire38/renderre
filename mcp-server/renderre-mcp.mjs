@@ -69,6 +69,7 @@ const COMPONENT_PROPS = {
   depth: { ...num, description: "profundidad en Z (m)" },
   depthInset: { ...num, description: "retiro desde el frente (m)" },
   count: num, hinge: { enum: ["left", "right"] }, orient: { enum: ["front", "horizontal", "vertical"] },
+  shape: { enum: ["box", "cylinder", "sphere", "cone", "pyramid", "wedge"], description: "solo placa (board): forma 3D" },
   open: { ...num, description: "0..1 apertura para previsualizar" },
   color: str, materialId: str,
 };

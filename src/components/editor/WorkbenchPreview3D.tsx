@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
+import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { Grid, OrbitControls } from "@react-three/drei";
 import { carcassPanels, type Panel } from "@/lib/furniture";
@@ -17,12 +18,33 @@ function shade(hex: string, amt: number): string {
 }
 
 function Piece({ panel, baseColor, materials }: { panel: Panel; baseColor: string; materials: Material[] }) {
-  const { pos, size, cylinder, cylAxis, pivot, rotY, door } = panel;
+  const { pos, size, cylinder, cylAxis, shape, pivot, rotY, door } = panel;
   const matColor = panel.materialId ? materials.find((m) => m.id === panel.materialId)?.color : undefined;
   const color = matColor ?? panel.color ?? (door ? shade(baseColor, -0.06) : baseColor);
+  const wedgeGeom = useMemo(() => {
+    if (shape !== "wedge") return null;
+    const s = new THREE.Shape();
+    s.moveTo(-size[0] / 2, -size[1] / 2);
+    s.lineTo(size[0] / 2, -size[1] / 2);
+    s.lineTo(-size[0] / 2, size[1] / 2);
+    s.closePath();
+    const g = new THREE.ExtrudeGeometry(s, { depth: size[2], bevelEnabled: false });
+    g.translate(0, 0, -size[2] / 2);
+    return g;
+  }, [shape, size]);
+  useEffect(() => () => wedgeGeom?.dispose(), [wedgeGeom]);
   let geom = <boxGeometry args={size} />;
   let meshRot: [number, number, number] = [0, 0, 0];
-  if (cylinder) {
+  if (shape === "sphere") {
+    geom = <sphereGeometry args={[size[0] / 2, 24, 16]} />;
+  } else if (shape === "cone") {
+    geom = <coneGeometry args={[Math.max(size[0], size[2]) / 2, size[1], 24]} />;
+  } else if (shape === "pyramid") {
+    geom = <coneGeometry args={[Math.max(size[0], size[2]) / 2 / Math.cos(Math.PI / 4), size[1], 4]} />;
+    meshRot = [0, Math.PI / 4, 0];
+  } else if (shape === "wedge" && wedgeGeom) {
+    geom = <primitive object={wedgeGeom} attach="geometry" />;
+  } else if (cylinder) {
     const ax = cylAxis ?? "x";
     if (ax === "y") {
       geom = <cylinderGeometry args={[size[0] / 2, size[0] / 2, size[1], 16]} />;

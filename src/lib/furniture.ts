@@ -347,7 +347,16 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       panels.push({ pos: [cx(c.x, c.w), base + c.y, 0], size: [c.w, 0.03, 0.03], cylinder: true, color: col ?? "#9aa3ad" });
     } else if (c.kind === "board") {
       const o = c.orient ?? "front";
-      if (o === "front") {
+      const shp = c.shape && c.shape !== "box" ? c.shape : null;
+      if (shp) {
+        // Placa con forma de primitiva: ocupa el rectángulo (w×h) con profundidad propia.
+        const dep = cl(c.depth ?? Math.min(c.w, c.h, fullD), 0.02, D);
+        const inset = cl(c.depthInset ?? 0, 0, Math.max(0, D - dep));
+        const pos: [number, number, number] = [cx(c.x, c.w), cyTop(c.y, c.h), -D / 2 + inset + dep / 2];
+        const size: [number, number, number] = [c.w, c.h, dep];
+        if (shp === "cylinder") panels.push({ pos, size, cylinder: true, cylAxis: "y", color: col, materialId: mat });
+        else panels.push({ pos, size, shape: shp, color: col, materialId: mat });
+      } else if (o === "front") {
         const inset = cl(c.depthInset ?? 0, 0, Math.max(0, D - t));
         panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), frontZ + inset], size: [c.w, c.h, t], color: col, materialId: mat });
       } else if (o === "horizontal") {

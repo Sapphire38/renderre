@@ -90,9 +90,10 @@ function CompProps({ c }: { c: FurnitureComponent }) {
 
       {(() => {
         const orient = c.orient ?? "front";
-        const isFrontBoard = c.kind === "board" && orient === "front";
+        const shaped = c.kind === "board" && !!c.shape && c.shape !== "box";
+        const isFrontBoard = c.kind === "board" && orient === "front" && !shaped;
         const showDepth =
-          c.kind === "shelf" || c.kind === "divider" || c.kind === "drawer" || (c.kind === "board" && orient !== "front");
+          c.kind === "shelf" || c.kind === "divider" || c.kind === "drawer" || (c.kind === "board" && (orient !== "front" || shaped));
         const showInset = c.kind === "shelf" || c.kind === "divider" || c.kind === "board";
         const defaultDepth =
           c.kind === "drawer"
@@ -188,6 +189,24 @@ function CompProps({ c }: { c: FurnitureComponent }) {
       )}
       {c.kind === "board" && (
         <label className="flex items-center justify-between gap-2 py-1 text-sm">
+          <span className="text-neutral-400">Forma</span>
+          <select
+            value={c.shape ?? "box"}
+            onFocus={beginEdit}
+            onChange={(e) => set({ shape: e.target.value as FurnitureComponent["shape"] })}
+            className="rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100"
+          >
+            <option value="box">Placa (caja)</option>
+            <option value="cylinder">Cilindro</option>
+            <option value="sphere">Esfera</option>
+            <option value="cone">Cono</option>
+            <option value="pyramid">Pirámide</option>
+            <option value="wedge">Cuña / rampa</option>
+          </select>
+        </label>
+      )}
+      {c.kind === "board" && (!c.shape || c.shape === "box") && (
+        <label className="flex items-center justify-between gap-2 py-1 text-sm">
           <span className="text-neutral-400">Orientación</span>
           <select
             value={c.orient ?? "front"}
@@ -252,7 +271,7 @@ export default function WorkbenchControls() {
 
   if (!draft) return null;
   const sel = (draft.components ?? []).find((c) => c.id === selectedId) ?? null;
-  const mdfPresets = FURNITURE_PRESETS.filter((p) => p.category !== "equip");
+  const mdfPresets = FURNITURE_PRESETS.filter((p) => !p.category || p.category === "mdf");
 
   return (
     <div className="flex h-full flex-col overflow-auto bg-neutral-900 text-sm">
