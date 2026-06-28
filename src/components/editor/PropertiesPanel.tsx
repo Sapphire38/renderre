@@ -3,7 +3,7 @@
 import { useEditor } from "@/lib/store";
 import { angleDeg, formatLen, totalLength, wallLength } from "@/lib/geometry";
 import { OPENING_STYLES, defaultStyle } from "@/lib/openings";
-import type { Furniture, Opening, OpeningKind, Wall } from "@/lib/types";
+import type { Furniture, Opening, OpeningKind, RoofKind, Wall } from "@/lib/types";
 import { TrashIcon } from "./icons";
 import MaterialControls from "./MaterialControls";
 
@@ -122,7 +122,7 @@ function WallProps({ sel }: { sel: Wall }) {
           onChange={(v) => patch({ thickness: clamp(v / 100, 0.02, 1) })}
         />
       </Row>
-      <Row label="Altura">
+      <Row label="Altura (pareja)">
         <NumField
           value={sel.height}
           unit="m"
@@ -130,7 +130,40 @@ function WallProps({ sel }: { sel: Wall }) {
           min={0.1}
           max={6}
           onFocus={beginEdit}
-          onChange={(v) => patch({ height: clamp(v, 0.1, 6) })}
+          onChange={(v) => patch({ height: clamp(v, 0.1, 6), heightA: undefined, heightB: undefined })}
+        />
+      </Row>
+      <Row label="Altura base">
+        <NumField
+          value={+(sel.base ?? 0).toFixed(2)}
+          unit="m"
+          step={0.1}
+          min={0}
+          max={6}
+          onFocus={beginEdit}
+          onChange={(v) => patch({ base: clamp(v, 0, 6) })}
+        />
+      </Row>
+      <Row label="Alto en inicio (A)">
+        <NumField
+          value={+(sel.heightA ?? sel.height).toFixed(2)}
+          unit="m"
+          step={0.1}
+          min={0.1}
+          max={8}
+          onFocus={beginEdit}
+          onChange={(v) => patch({ heightA: clamp(v, 0.1, 8) })}
+        />
+      </Row>
+      <Row label="Alto en fin (B)">
+        <NumField
+          value={+(sel.heightB ?? sel.height).toFixed(2)}
+          unit="m"
+          step={0.1}
+          min={0.1}
+          max={8}
+          onFocus={beginEdit}
+          onChange={(v) => patch({ heightB: clamp(v, 0.1, 8) })}
         />
       </Row>
       <Row label="Inicio X">
@@ -426,6 +459,156 @@ function Defaults() {
   );
 }
 
+function RoofSection() {
+  const activeLevel = useEditor((s) => s.activeLevel);
+  const floors = useEditor((s) => s.floors);
+  const roofs = useEditor((s) => s.roofs);
+  const materials = useEditor((s) => s.materials);
+  const setRoof = useEditor((s) => s.setRoof);
+  const updateRoof = useEditor((s) => s.updateRoof);
+  const removeRoof = useEditor((s) => s.removeRoof);
+  const roof = roofs.find((r) => r.level === activeLevel);
+  const floorName = floors[activeLevel]?.name ?? "piso";
+  const chip = (active: boolean) =>
+    [
+      "grid h-7 w-7 place-items-center overflow-hidden rounded border",
+      active ? "border-sky-400 ring-1 ring-sky-400" : "border-neutral-700 hover:border-neutral-500",
+    ].join(" ");
+  return (
+    <Section title={`Techo · ${floorName}`}>
+      <Row label="Tipo">
+        <select
+          value={roof?.kind ?? "none"}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "none") removeRoof(activeLevel);
+            else setRoof(activeLevel, v as RoofKind);
+          }}
+          className="rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-sky-600"
+        >
+          <option value="none">Sin techo</option>
+          <option value="flat">Losa plana</option>
+          <option value="gable">A dos aguas</option>
+        </select>
+      </Row>
+      {roof && (
+        <>
+          <Row label="Altura aleros">
+            <NumField value={+roof.height.toFixed(2)} unit="m" step={0.1} min={0.1} max={12} onChange={(v) => updateRoof(activeLevel, { height: clamp(v, 0.1, 12) })} />
+          </Row>
+          {roof.kind === "gable" && (
+            <>
+              <Row label="Alto cumbrera">
+                <NumField value={+roof.rise.toFixed(2)} unit="m" step={0.1} min={0} max={6} onChange={(v) => updateRoof(activeLevel, { rise: clamp(v, 0, 6) })} />
+              </Row>
+              <Row label="Cumbrera">
+                <select
+                  value={roof.ridgeAxis ?? "auto"}
+                  onChange={(e) => updateRoof(activeLevel, { ridgeAxis: e.target.value === "auto" ? undefined : (e.target.value as "x" | "z") })}
+                  className="rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-sky-600"
+                >
+                  <option value="auto">Auto (lado largo)</option>
+                  <option value="x">Eje X</option>
+                  <option value="z">Eje Z</option>
+                </select>
+              </Row>
+            </>
+          )}
+          <Row label="Alero (saliente)">
+            <NumField value={Math.round((roof.overhang ?? 0) * 100)} unit="cm" min={0} max={150} onChange={(v) => updateRoof(activeLevel, { overhang: clamp(v / 100, 0, 1.5) })} />
+          </Row>
+          <div className="py-1">
+            <div className="mb-1 text-sm text-neutral-400">Material</div>
+            <div className="flex flex-wrap gap-1.5">
+              <button type="button" onClick={() => updateRoof(activeLevel, { materialId: undefined })} title="Color por defecto" className={chip(!roof.materialId)}>
+                <span className="text-[10px] text-neutral-400">—</span>
+              </button>
+              {materials.map((m) => (
+                <button key={m.id} type="button" onClick={() => updateRoof(activeLevel, { materialId: m.id })} title={m.name} className={chip(roof.materialId === m.id)}>
+                  {m.albedo ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={m.albedo} alt={m.name} className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="h-full w-full" style={{ background: m.color }} />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="mt-1 text-[11px] leading-snug text-neutral-600">Cubre la huella de los muros del piso activo. Mirá el resultado en el 3D.</p>
+        </>
+      )}
+    </Section>
+  );
+}
+
+function FloorLevelMaterial() {
+  const activeLevel = useEditor((s) => s.activeLevel);
+  const floors = useEditor((s) => s.floors);
+  const materials = useEditor((s) => s.materials);
+  const setFloorLevelMaterial = useEditor((s) => s.setFloorLevelMaterial);
+  const cur = floors[activeLevel]?.materialId;
+  const name = floors[activeLevel]?.name ?? "piso";
+  const chip = (active: boolean) =>
+    [
+      "grid h-7 w-7 place-items-center overflow-hidden rounded border",
+      active ? "border-sky-400 ring-1 ring-sky-400" : "border-neutral-700 hover:border-neutral-500",
+    ].join(" ");
+  return (
+    <div className="py-1">
+      <div className="mb-1 text-sm text-neutral-400">Suelo de {name} (propio)</div>
+      <div className="flex flex-wrap gap-1.5">
+        <button type="button" onClick={() => setFloorLevelMaterial(activeLevel, null)} title="Usar material global del piso" className={chip(!cur)}>
+          <span className="text-[10px] text-neutral-400">—</span>
+        </button>
+        {materials.map((m) => (
+          <button key={m.id} type="button" onClick={() => setFloorLevelMaterial(activeLevel, m.id)} title={m.name} className={chip(cur === m.id)}>
+            {m.albedo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={m.albedo} alt={m.name} className="h-full w-full object-cover" />
+            ) : (
+              <span className="h-full w-full" style={{ background: m.color }} />
+            )}
+          </button>
+        ))}
+      </div>
+      <p className="mt-1 text-[11px] leading-snug text-neutral-600">Anula el material global solo para este nivel.</p>
+    </div>
+  );
+}
+
+function RenderSection() {
+  const render = useEditor((s) => s.render);
+  const setRender = useEditor((s) => s.setRender);
+  return (
+    <Section title="Render / Iluminación">
+      <Row label="Sol · dirección">
+        <NumField value={Math.round(render.sunAzimuth)} unit="°" min={0} max={360} step={5} onChange={(v) => setRender({ sunAzimuth: ((v % 360) + 360) % 360 })} />
+      </Row>
+      <Row label="Sol · altura">
+        <NumField value={Math.round(render.sunElevation)} unit="°" min={1} max={90} step={1} onChange={(v) => setRender({ sunElevation: clamp(v, 1, 90) })} />
+      </Row>
+      <Row label="Sol · intensidad">
+        <NumField value={+render.sunIntensity.toFixed(2)} unit="" min={0} max={3} step={0.05} onChange={(v) => setRender({ sunIntensity: clamp(v, 0, 3) })} />
+      </Row>
+      <Row label="Luz ambiente">
+        <NumField value={+render.ambient.toFixed(2)} unit="" min={0} max={2} step={0.05} onChange={(v) => setRender({ ambient: clamp(v, 0, 2) })} />
+      </Row>
+      <Row label="Fondo / cielo">
+        <input
+          type="color"
+          value={render.background}
+          onChange={(e) => setRender({ background: e.target.value })}
+          className="h-7 w-12 cursor-pointer rounded border border-neutral-800 bg-neutral-950"
+        />
+      </Row>
+      <Row label="Sombras">
+        <input type="checkbox" checked={render.shadows} onChange={(e) => setRender({ shadows: e.target.checked })} className="h-4 w-4 accent-sky-500" />
+      </Row>
+    </Section>
+  );
+}
+
 export default function PropertiesPanel() {
   const walls = useEditor((s) => s.walls);
   const furniture = useEditor((s) => s.furniture);
@@ -475,7 +658,12 @@ export default function PropertiesPanel() {
 
       <Section title="Piso">
         <MaterialControls target="floor" />
+        <FloorLevelMaterial />
       </Section>
+
+      <RoofSection />
+
+      <RenderSection />
 
       <div className="mt-auto px-4 py-3 text-[11px] leading-relaxed text-neutral-600">
         Atajos: <span className="text-neutral-400">V</span> seleccionar ·{" "}

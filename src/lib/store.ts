@@ -10,6 +10,9 @@ import type {
   Opening,
   OpeningKind,
   ProjectData,
+  RenderSettings,
+  Roof,
+  RoofKind,
   Selection,
   SelRef,
   ToolId,
@@ -21,6 +24,7 @@ import { uid } from "./geometry";
 import { carcassPanels, customFromPreset, makeComponent, makeCustomFurniture, makeFurniture } from "./furniture";
 import { makeOpening, OPENING_STYLES, defaultStyle } from "./openings";
 import { seedMaterials } from "./materials";
+import { DEFAULT_RENDER } from "./types";
 
 const MIN_LEN = 0.02; // 2 cm: longitud mínima de un muro
 
@@ -84,6 +88,8 @@ export type EditorState = {
   floors: Floor[];
   activeLevel: number;
   floorMaterialId?: string;
+  roofs: Roof[];
+  render: RenderSettings;
   tool: ToolId;
   furnitureKind: FurnitureKind; // preset a colocar con la herramienta "furniture"
   openingKind: OpeningKind; // puerta/ventana a colocar
@@ -155,6 +161,11 @@ export type EditorState = {
   renameFloor: (i: number, name: string) => void;
   setFloorElevation: (i: number, elevation: number) => void;
 
+  // Techos (uno por nivel)
+  setRoof: (level: number, kind: RoofKind) => void;
+  updateRoof: (level: number, patch: Partial<Omit<Roof, "id" | "level">>) => void;
+  removeRoof: (level: number) => void;
+
   // Taller de muebles
   openWorkbench: (base?: Furniture) => void;
   openWorkbenchFromPreset: (kind: FurnitureKind) => void;
@@ -183,6 +194,8 @@ export type EditorState = {
   updateMaterial: (id: string, patch: Partial<Omit<Material, "id">>) => void;
   assignMaterialToSelection: (id: string | null) => void;
   setFloorMaterial: (id: string | null) => void;
+  setFloorLevelMaterial: (level: number, id: string | null) => void;
+  setRender: (patch: Partial<RenderSettings>) => void;
 
   setGrid: (patch: Partial<GridSettings>) => void;
   setWallDefaults: (patch: Partial<WallDefaults>) => void;
@@ -206,6 +219,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   floors: [{ name: "Planta baja", elevation: 0 }],
   activeLevel: 0,
   floorMaterialId: undefined,
+  roofs: [],
+  render: { ...DEFAULT_RENDER },
   tool: "wall",
   furnitureKind: "cabinet-base",
   openingKind: "door",
@@ -535,6 +550,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       walls: st.walls.filter((w) => keep(w.level)).map((w) => ({ ...w, level: reidx(w.level) })),
       furniture: st.furniture.filter((f) => keep(f.level)).map((f) => ({ ...f, level: reidx(f.level) })),
       openings: st.openings.filter((o) => keep(o.level)).map((o) => ({ ...o, level: reidx(o.level) })),
+      roofs: st.roofs.filter((r) => r.level !== i).map((r) => ({ ...r, level: reidx(r.level) })),
       activeLevel: newActive,
       selection: null,
       multi: [],
@@ -545,6 +561,28 @@ export const useEditor = create<EditorState>((set, get) => ({
   renameFloor: (i, name) => set((s) => ({ floors: s.floors.map((f, k) => (k === i ? { ...f, name } : f)), dirty: true })),
   setFloorElevation: (i, elevation) =>
     set((s) => ({ floors: s.floors.map((f, k) => (k === i ? { ...f, elevation } : f)), dirty: true })),
+
+  setRoof: (level, kind) => {
+    const s = get();
+    get().pushHistory();
+    // altura de aleros por defecto = tope máximo de los muros del nivel (o 2.5)
+    const lvlWalls = s.walls.filter((w) => (w.level ?? 0) === level);
+    let h = 2.5;
+    for (const w of lvlWalls) h = Math.max(h, w.heightB ?? w.heightA ?? w.height);
+    const existing = s.roofs.find((r) => r.level === level);
+    const roof: Roof = existing
+      ? { ...existing, kind }
+      : { id: uid(), level, kind, height: h, rise: 1.2, overhang: 0.3, thickness: 0.12 };
+    set((st) => ({
+      roofs: [...st.roofs.filter((r) => r.level !== level), roof],
+      dirty: true,
+    }));
+    get().pushToast(`Techo ${kind === "gable" ? "a dos aguas" : "plano"} en ${s.floors[level]?.name ?? "el piso"}`);
+  },
+  updateRoof: (level, patch) =>
+    set((s) => ({ roofs: s.roofs.map((r) => (r.level === level ? { ...r, ...patch } : r)), dirty: true })),
+  removeRoof: (level) =>
+    set((s) => ({ roofs: s.roofs.filter((r) => r.level !== level), dirty: true })),
 
   openWorkbench: (base) =>
     set({
@@ -747,6 +785,12 @@ export const useEditor = create<EditorState>((set, get) => ({
     }));
   },
   setFloorMaterial: (id) => set({ floorMaterialId: id ?? undefined, dirty: true }),
+  setFloorLevelMaterial: (level, id) =>
+    set((s) => ({
+      floors: s.floors.map((f, k) => (k === level ? { ...f, materialId: id ?? undefined } : f)),
+      dirty: true,
+    })),
+  setRender: (patch) => set((s) => ({ render: { ...s.render, ...patch }, dirty: true })),
 
   setGrid: (patch) => set((s) => ({ grid: { ...s.grid, ...patch }, dirty: true })),
   setWallDefaults: (patch) =>
@@ -791,6 +835,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       floors: data.floors?.length ? data.floors.map((f) => ({ ...f })) : [{ name: "Planta baja", elevation: 0 }],
       activeLevel: data.activeLevel ?? 0,
       floorMaterialId: data.floorMaterialId,
+      roofs: (data.roofs ?? []).map((r) => ({ ...r })),
+      render: { ...DEFAULT_RENDER, ...(data.render ?? {}) },
       grid: { ...data.grid },
       wallDefaults: { ...data.wallDefaults },
       projectName: name,
@@ -814,6 +860,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       floors: s.floors.map((f) => ({ ...f })),
       activeLevel: s.activeLevel,
       floorMaterialId: s.floorMaterialId,
+      roofs: s.roofs.map((r) => ({ ...r })),
+      render: { ...s.render },
       grid: { ...s.grid },
       wallDefaults: { ...s.wallDefaults },
     };
@@ -828,6 +876,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       floors: [{ name: "Planta baja", elevation: 0 }],
       activeLevel: 0,
       floorMaterialId: undefined,
+      roofs: [],
+      render: { ...DEFAULT_RENDER },
       selection: null,
       multi: [],
       workbenchOpen: false,

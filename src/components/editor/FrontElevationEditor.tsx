@@ -128,11 +128,21 @@ export default function FrontElevationEditor() {
     const y1 = sy(t.H, t);
     ctx.fillStyle = "rgba(201,177,139,0.10)";
     ctx.fillRect(x0, y1, x1 - x0, y0 - y1);
-    // marco (espesor de placa)
-    const pPx = (draft.panel || 0.018) * t.scale;
-    ctx.strokeStyle = "rgba(206,213,224,0.55)";
-    ctx.lineWidth = Math.max(pPx, 3);
-    ctx.strokeRect(x0 + pPx / 2, y1 + pPx / 2, x1 - x0 - pPx, y0 - y1 - pPx);
+    if (draft.carcass === false) {
+      // sin carcasa: el marco es solo una guía (no hay caja real)
+      ctx.save();
+      ctx.setLineDash([6, 5]);
+      ctx.strokeStyle = "rgba(148,163,184,0.5)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x0, y1, x1 - x0, y0 - y1);
+      ctx.restore();
+    } else {
+      // marco (espesor de placa)
+      const pPx = (draft.panel || 0.018) * t.scale;
+      ctx.strokeStyle = "rgba(206,213,224,0.55)";
+      ctx.lineWidth = Math.max(pPx, 3);
+      ctx.strokeRect(x0 + pPx / 2, y1 + pPx / 2, x1 - x0 - pPx, y0 - y1 - pPx);
+    }
 
     const comps = draft.components ?? [];
 

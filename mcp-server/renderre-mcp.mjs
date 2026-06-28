@@ -59,6 +59,8 @@ const vec2 = { type: "array", items: { type: "number" }, minItems: 2, maxItems: 
 const FURNITURE_KINDS = [
   "module", "cabinet-base", "cabinet-wall", "shelf", "countertop", "wardrobe", "table",
   "tv", "fridge", "stove", "sink", "washer", "toilet", "bed", "sofa", "tv-stand", "nightstand", "desk", "vanity",
+  "water-heater", "bathtub", "shower", "chair", "plant", "round-table", "coffee-table", "stairs",
+  "prim-box", "prim-cylinder", "prim-sphere", "prim-cone", "prim-pyramid", "prim-wedge",
 ];
 const COMPONENT_KINDS = ["shelf", "drawer", "doorHinged", "doorSliding", "divider", "board", "rod"];
 // props comunes de un componente del taller (cm/m en metros, x desde izq, y desde abajo)
@@ -142,8 +144,9 @@ const TOOLS = [
   },
   {
     name: "renderre_add_wall",
-    description: "Agrega un muro entre dos puntos [x,z] (metros) en el piso activo.",
-    inputSchema: { type: "object", properties: { a: vec2, b: vec2, thickness: num, height: num }, required: ["a", "b"] },
+    description:
+      "Agrega un muro entre dos puntos [x,z] (metros) en el piso activo. Opcional: base (arranque desde el piso), heightA/heightB (tope en cada extremo; si difieren queda inclinado, para techos a dos aguas).",
+    inputSchema: { type: "object", properties: { a: vec2, b: vec2, thickness: num, height: num, base: num, heightA: num, heightB: num }, required: ["a", "b"] },
     handler: (a) => runCommand("add_wall", a, "Agregar muro"),
   },
   {
@@ -279,6 +282,7 @@ const TOOLS = [
       properties: {
         id: str, x: num, z: num, rotDeg: num, width: num, depth: num, height: num, panel: num,
         doors: num, shelves: num, baseHeight: num, color: str, name: str, materialId: str,
+        carcass: bool, back: bool,
       },
       required: ["id"],
     },
@@ -287,8 +291,8 @@ const TOOLS = [
   {
     name: "renderre_update_wall",
     description:
-      "Edita un muro existente por id: mover sus extremos a/b ([x,z], cambia largo/ángulo/posición), espesor, alto, nombre o material (materialId; null para quitarlo).",
-    inputSchema: { type: "object", properties: { id: str, a: vec2, b: vec2, thickness: num, height: num, name: str, materialId: str }, required: ["id"] },
+      "Edita un muro existente por id: mover extremos a/b ([x,z]), espesor, alto, base (arranque), heightA/heightB (tope inclinado a dos aguas), nombre o material (materialId; null para quitarlo).",
+    inputSchema: { type: "object", properties: { id: str, a: vec2, b: vec2, thickness: num, height: num, base: num, heightA: num, heightB: num, name: str, materialId: str }, required: ["id"] },
     handler: (a) => runCommand("update_wall", a, "Editar muro"),
   },
   {
@@ -299,9 +303,21 @@ const TOOLS = [
   },
   {
     name: "renderre_set_floor_material",
-    description: "Asigna (o quita) el material del piso. Pasá materialId (de get_state.materials) u omitilo para quitarlo.",
+    description: "Asigna (o quita) el material global del piso. Pasá materialId (de get_state.materials) u omitilo para quitarlo.",
     inputSchema: { type: "object", properties: { materialId: str } },
     handler: (a) => runCommand("set_floor_material", a, "Material de piso"),
+  },
+  {
+    name: "renderre_set_floor_level_material",
+    description: "Asigna (o quita) el material del suelo SOLO de un nivel/piso (anula el global para ese piso). level = índice del piso (0 = planta baja); omití level para usar el activo. Omití materialId para quitarlo.",
+    inputSchema: { type: "object", properties: { level: num, materialId: str } },
+    handler: (a) => runCommand("set_floor_level_material", a, "Material de piso (nivel)"),
+  },
+  {
+    name: "renderre_set_render",
+    description: "Ajusta iluminación y fondo de la vista 3D. sunAzimuth (0..360°, dirección del sol en planta), sunElevation (1..90°, altura sobre el horizonte), sunIntensity (0..3), ambient (0..2, luz ambiente), background (color hex del cielo/fondo), shadows (true/false). Pasá solo los campos que quieras cambiar.",
+    inputSchema: { type: "object", properties: { sunAzimuth: num, sunElevation: num, sunIntensity: num, ambient: num, background: str, shadows: bool } },
+    handler: (a) => runCommand("set_render", a, "Ajustes de render"),
   },
   {
     name: "renderre_place_custom",
@@ -320,8 +336,8 @@ const TOOLS = [
   },
   {
     name: "renderre_set_draft",
-    description: "Ajusta el mueble en edición en el Taller: nombre, medidas (width/height/depth/panel, m), color y si tiene fondo (back).",
-    inputSchema: { type: "object", properties: { name: str, width: num, height: num, depth: num, panel: num, color: str, back: bool } },
+    description: "Ajusta el mueble en edición en el Taller: nombre, medidas (width/height/depth/panel, m), color, fondo (back) y carcasa (carcass: false = sin la caja, solo componentes, para formas libres como una escalera).",
+    inputSchema: { type: "object", properties: { name: str, width: num, height: num, depth: num, panel: num, color: str, back: bool, carcass: bool } },
     handler: (a) => runCommand("set_draft", a, "Ajustar mueble"),
   },
   {
@@ -403,6 +419,25 @@ const TOOLS = [
     description: "Elimina un piso (level omitido = activo). Reindexa los elementos; debe quedar al menos uno.",
     inputSchema: { type: "object", properties: { level: num } },
     handler: (a) => runCommand("remove_floor", a, "Eliminar piso"),
+  },
+  // ---- techos ----
+  {
+    name: "renderre_set_roof",
+    description: "Pone (o cambia) el techo de un nivel. kind: flat (losa plana) | gable (a dos aguas). level omitido = activo. Cubre la huella de los muros del nivel.",
+    inputSchema: { type: "object", properties: { level: num, kind: { enum: ["flat", "gable"] } }, required: ["kind"] },
+    handler: (a) => runCommand("set_roof", a, "Poner techo"),
+  },
+  {
+    name: "renderre_update_roof",
+    description: "Ajusta el techo de un nivel: height (altura de aleros desde el piso), rise (cuánto sube la cumbrera, gable), overhang (alero saliente, m), ridgeAxis (x|z, dirección de la cumbrera), thickness, materialId.",
+    inputSchema: { type: "object", properties: { level: num, height: num, rise: num, overhang: num, ridgeAxis: { enum: ["x", "z"] }, thickness: num, materialId: str } },
+    handler: (a) => runCommand("update_roof", a, "Ajustar techo"),
+  },
+  {
+    name: "renderre_remove_roof",
+    description: "Quita el techo de un nivel (level omitido = activo).",
+    inputSchema: { type: "object", properties: { level: num } },
+    handler: (a) => runCommand("remove_roof", a, "Quitar techo"),
   },
   // ---- materiales ----
   {

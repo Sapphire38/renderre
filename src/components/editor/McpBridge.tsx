@@ -63,13 +63,14 @@ function snapshot() {
     savedProjects: listProjects().map((p) => ({ name: p.name, updatedAt: p.updatedAt })),
     activeLevel: s.activeLevel,
     floors: s.floors,
+    roofs: s.roofs,
     counts: {
       walls: s.walls.length,
       furniture: s.furniture.length,
       openings: s.openings.length,
       floors: s.floors.length,
     },
-    walls: s.walls.map((w) => ({ id: w.id, name: w.name, a: w.a, b: w.b, thickness: w.thickness, height: w.height, materialId: w.materialId, level: w.level ?? 0 })),
+    walls: s.walls.map((w) => ({ id: w.id, name: w.name, a: w.a, b: w.b, thickness: w.thickness, height: w.height, base: w.base, heightA: w.heightA, heightB: w.heightB, materialId: w.materialId, level: w.level ?? 0 })),
     furniture: s.furniture.map((f) => ({
       id: f.id, kind: f.kind, name: f.name, pos: f.pos, rotDeg: f.rotDeg,
       width: f.width, depth: f.depth, height: f.height, panel: f.panel, doors: f.doors, shelves: f.shelves,
@@ -79,6 +80,7 @@ function snapshot() {
     openings: s.openings.map((o) => ({ id: o.id, wallId: o.wallId, kind: o.kind, style: o.style, hinge: o.hinge, swing: o.swing, name: o.name, offset: o.offset, width: o.width, height: o.height, sill: o.sill, level: o.level ?? 0 })),
     materials: s.materials.map((m) => ({ id: m.id, name: m.name, color: m.color, tileM: m.tileM, roughness: m.roughness, metalness: m.metalness })),
     floorMaterialId: s.floorMaterialId,
+    render: s.render,
     customLibrary: s.customLibrary.map((f) => ({ id: f.id, name: f.name })),
     selection: s.selection,
     multi: s.multi,
@@ -108,6 +110,7 @@ function snapshot() {
           panel: s.draft.panel,
           color: s.draft.color,
           back: s.draft.back !== false,
+          carcass: s.draft.carcass !== false,
           components: (s.draft.components ?? []).map((c) => ({
             id: c.id, kind: c.kind, x: c.x, y: c.y, w: c.w, h: c.h,
             depth: c.depth, depthInset: c.depthInset, count: c.count,
@@ -173,12 +176,11 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       const b = vec(args.b);
       if (!a || !b) break;
       const id = st.addWall(a, b);
-      if (id && (args.thickness !== undefined || args.height !== undefined)) {
-        st.updateWall(id, {
-          ...(args.thickness !== undefined ? { thickness: num(args.thickness)! } : {}),
-          ...(args.height !== undefined ? { height: num(args.height)! } : {}),
-        });
+      const patch: Record<string, number> = {};
+      for (const k of ["thickness", "height", "base", "heightA", "heightB"] as const) {
+        if (args[k] !== undefined) patch[k] = num(args[k])!;
       }
+      if (id && Object.keys(patch).length) st.updateWall(id, patch);
       break;
     }
     case "add_furniture": {
@@ -253,6 +255,8 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       }
       if (typeof args.color === "string") patch.color = args.color;
       if (typeof args.name === "string") patch.name = args.name;
+      if (typeof args.carcass === "boolean") patch.carcass = args.carcass;
+      if (typeof args.back === "boolean") patch.back = args.back;
       if ("materialId" in args) patch.materialId = args.materialId == null ? undefined : String(args.materialId);
       st.updateFurniture(id, patch as Partial<Omit<Furniture, "id">>);
       break;
@@ -260,7 +264,7 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
     case "update_wall": {
       const id = String(args.id ?? "");
       const patch: Record<string, unknown> = {};
-      for (const k of ["thickness", "height"] as const) if (args[k] !== undefined) patch[k] = num(args[k]);
+      for (const k of ["thickness", "height", "base", "heightA", "heightB"] as const) if (args[k] !== undefined) patch[k] = num(args[k]);
       const a = vec(args.a);
       const b = vec(args.b);
       if (a) patch.a = a;
@@ -290,6 +294,18 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
     case "set_floor_material":
       st.setFloorMaterial(args.materialId == null ? null : String(args.materialId));
       break;
+    case "set_floor_level_material":
+      st.setFloorLevelMaterial(Number(args.level ?? st.activeLevel), args.materialId == null ? null : String(args.materialId));
+      break;
+    case "set_render": {
+      const patch: Record<string, unknown> = {};
+      for (const k of ["sunAzimuth", "sunElevation", "sunIntensity", "ambient"] as const)
+        if (args[k] != null) patch[k] = Number(args[k]);
+      if (args.background != null) patch.background = String(args.background);
+      if (args.shadows != null) patch.shadows = Boolean(args.shadows);
+      st.setRender(patch);
+      break;
+    }
     case "place_custom": {
       const lib = useEditor.getState().customLibrary;
       let libId = typeof args.libId === "string" ? args.libId : undefined;
@@ -326,6 +342,7 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       for (const k of ["width", "height", "depth", "panel"] as const) if (args[k] !== undefined) patch[k] = num(args[k]);
       if (typeof args.color === "string") patch.color = args.color;
       if (typeof args.back === "boolean") patch.back = args.back;
+      if (typeof args.carcass === "boolean") patch.carcass = args.carcass;
       st.updateDraft(patch as Partial<Furniture>);
       break;
     }
@@ -388,6 +405,23 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       break;
     case "remove_floor":
       st.removeFloor(num(args.level) ?? st.activeLevel);
+      break;
+
+    // --- techos ---
+    case "set_roof":
+      st.setRoof(num(args.level) ?? st.activeLevel, String(args.kind ?? "flat") as "flat" | "gable");
+      break;
+    case "update_roof": {
+      const level = num(args.level) ?? st.activeLevel;
+      const patch: Record<string, unknown> = {};
+      for (const k of ["height", "rise", "overhang", "thickness"] as const) if (args[k] !== undefined) patch[k] = num(args[k]);
+      if (args.ridgeAxis === "x" || args.ridgeAxis === "z") patch.ridgeAxis = args.ridgeAxis;
+      if ("materialId" in args) patch.materialId = args.materialId == null ? undefined : String(args.materialId);
+      st.updateRoof(level, patch);
+      break;
+    }
+    case "remove_roof":
+      st.removeRoof(num(args.level) ?? st.activeLevel);
       break;
 
     // --- materiales ---

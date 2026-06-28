@@ -7,7 +7,7 @@ import { Grid, OrbitControls } from "@react-three/drei";
 import { useEditor, selectedRefs } from "@/lib/store";
 import { carcassPanels, footprintCorners } from "@/lib/furniture";
 import { wallPieces } from "@/lib/openings";
-import type { Furniture, Material, Opening, Wall } from "@/lib/types";
+import type { Furniture, Material, Opening, Roof, Wall } from "@/lib/types";
 import { ExpandIcon, ShrinkIcon, FullscreenIcon } from "./icons";
 
 function shade(hex: string, amt: number): string {
@@ -75,6 +75,7 @@ function BoxPiece({
   rotY,
   cylinder,
   cylAxis,
+  shape,
 }: {
   pos: [number, number, number];
   size: [number, number, number];
@@ -85,6 +86,7 @@ function BoxPiece({
   rotY?: number;
   cylinder?: boolean;
   cylAxis?: "x" | "y" | "z";
+  shape?: "sphere" | "cone" | "pyramid" | "wedge";
 }) {
   const tileM = mat?.tileM ?? 1;
   const dims = [...size].sort((a, b) => b - a);
@@ -95,9 +97,31 @@ function BoxPiece({
     Math.max(1, Math.round(dims[1] / tileM)),
     selected,
   );
+  // Geometría de cuña (prisma triangular) construida a mano; rampa que sube en +X.
+  const wedgeGeom = useMemo(() => {
+    if (shape !== "wedge") return null;
+    const s = new THREE.Shape();
+    s.moveTo(-size[0] / 2, -size[1] / 2);
+    s.lineTo(size[0] / 2, -size[1] / 2);
+    s.lineTo(-size[0] / 2, size[1] / 2);
+    s.closePath();
+    const g = new THREE.ExtrudeGeometry(s, { depth: size[2], bevelEnabled: false });
+    g.translate(0, 0, -size[2] / 2);
+    return g;
+  }, [shape, size]);
+  useEffect(() => () => wedgeGeom?.dispose(), [wedgeGeom]);
   let geom = <boxGeometry args={size} />;
   let meshRot: [number, number, number] | undefined = undefined;
-  if (cylinder) {
+  if (shape === "sphere") {
+    geom = <sphereGeometry args={[size[0] / 2, 24, 16]} />;
+  } else if (shape === "cone") {
+    geom = <coneGeometry args={[Math.max(size[0], size[2]) / 2, size[1], 24]} />;
+  } else if (shape === "pyramid") {
+    geom = <coneGeometry args={[Math.max(size[0], size[2]) / 2 / Math.cos(Math.PI / 4), size[1], 4]} />;
+    meshRot = [0, Math.PI / 4, 0];
+  } else if (shape === "wedge" && wedgeGeom) {
+    geom = <primitive object={wedgeGeom} attach="geometry" />;
+  } else if (cylinder) {
     const ax = cylAxis ?? "x";
     if (ax === "y") {
       geom = <cylinderGeometry args={[size[0] / 2, size[0] / 2, size[1], 16]} />;
@@ -143,12 +167,44 @@ function Wall3D({
   const dx = wall.b.x - wall.a.x;
   const dz = wall.b.z - wall.a.z;
   const len = Math.hypot(dx, dz);
-  const pieces = useMemo(() => wallPieces(wall, openings), [wall, openings]);
+  const base = wall.base ?? 0;
+  const topA = wall.heightA ?? wall.height;
+  const topB = wall.heightB ?? wall.height;
+  const topMin = Math.min(topA, topB);
+  const bodyH = Math.max(topMin - base, 0.01);
+  // El cuerpo rectangular (con aberturas) va de la base hasta el tope más bajo.
+  const bodyWall = useMemo<Wall>(
+    () => ({ ...wall, base: 0, height: bodyH, heightA: undefined, heightB: undefined }),
+    [wall, bodyH],
+  );
+  const pieces = useMemo(() => wallPieces(bodyWall, openings), [bodyWall, openings]);
+  // Triángulo "piñón" para el tope inclinado (de topMin al tope más alto en una punta).
+  const gableGeom = useMemo(() => {
+    if (Math.abs(topA - topB) < 1e-4) return null;
+    const half = len / 2;
+    const yLow = bodyH; // = topMin - base (local)
+    const shape = new THREE.Shape();
+    if (topA >= topB) {
+      shape.moveTo(-half, yLow);
+      shape.lineTo(-half, topA - base);
+      shape.lineTo(half, yLow);
+    } else {
+      shape.moveTo(half, yLow);
+      shape.lineTo(half, topB - base);
+      shape.lineTo(-half, yLow);
+    }
+    shape.closePath();
+    const g = new THREE.ExtrudeGeometry(shape, { depth: wall.thickness, bevelEnabled: false });
+    g.translate(0, 0, -wall.thickness / 2);
+    return g;
+  }, [topA, topB, base, bodyH, len, wall.thickness]);
+  useEffect(() => () => gableGeom?.dispose(), [gableGeom]);
   if (len < 1e-4) return null;
   const mx = (wall.a.x + wall.b.x) / 2;
   const mz = (wall.a.z + wall.b.z) / 2;
+  const gableColor = selected ? "#38bdf8" : mat?.color ?? "#d6d3cd";
   return (
-    <group position={[mx, yOffset, mz]} rotation={[0, Math.atan2(-dz, dx), 0]}>
+    <group position={[mx, yOffset + base, mz]} rotation={[0, Math.atan2(-dz, dx), 0]}>
       {pieces.map((p, i) => (
         <BoxPiece
           key={i}
@@ -159,6 +215,11 @@ function Wall3D({
           selected={selected}
         />
       ))}
+      {gableGeom && (
+        <mesh geometry={gableGeom} castShadow receiveShadow>
+          <meshStandardMaterial color={gableColor} roughness={mat?.roughness ?? 0.85} metalness={mat?.metalness ?? 0} />
+        </mesh>
+      )}
     </group>
   );
 }
@@ -194,6 +255,7 @@ function Furniture3D({
             rotY={p.rotY}
             cylinder={p.cylinder}
             cylAxis={p.cylAxis}
+            shape={p.shape}
           />
         );
       })}
@@ -242,6 +304,70 @@ function FloorSlab({
   );
 }
 
+type Bounds3 = { minX: number; maxX: number; minZ: number; maxZ: number };
+
+/** Dos faldones de un techo a dos aguas, sobre la huella, con cumbrera en el eje dado. */
+function buildRoofGable(b: Bounds3, baseY: number, rise: number, axis: "x" | "z"): THREE.BufferGeometry {
+  const ridgeY = baseY + rise;
+  let v: number[];
+  if (axis === "x") {
+    const mz = (b.minZ + b.maxZ) / 2;
+    v = [
+      // faldón lado -Z
+      b.minX, baseY, b.minZ, b.maxX, baseY, b.minZ, b.maxX, ridgeY, mz,
+      b.minX, baseY, b.minZ, b.maxX, ridgeY, mz, b.minX, ridgeY, mz,
+      // faldón lado +Z
+      b.minX, baseY, b.maxZ, b.maxX, ridgeY, mz, b.maxX, baseY, b.maxZ,
+      b.minX, baseY, b.maxZ, b.minX, ridgeY, mz, b.maxX, ridgeY, mz,
+    ];
+  } else {
+    const mx = (b.minX + b.maxX) / 2;
+    v = [
+      // faldón lado -X
+      b.minX, baseY, b.minZ, b.minX, baseY, b.maxZ, mx, ridgeY, b.maxZ,
+      b.minX, baseY, b.minZ, mx, ridgeY, b.maxZ, mx, ridgeY, b.minZ,
+      // faldón lado +X
+      b.maxX, baseY, b.minZ, mx, ridgeY, b.minZ, mx, ridgeY, b.maxZ,
+      b.maxX, baseY, b.minZ, mx, ridgeY, b.maxZ, b.maxX, baseY, b.maxZ,
+    ];
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Techo de un nivel: losa plana o a dos aguas, sobre la huella de los muros. */
+function Roof3D({ roof, bounds, elevation, mat }: { roof: Roof; bounds: Bounds3; elevation: number; mat?: Material }) {
+  const w = Math.max(bounds.maxX - bounds.minX, 0.2);
+  const d = Math.max(bounds.maxZ - bounds.minZ, 0.2);
+  const tileM = mat?.tileM ?? 1;
+  const repX = Math.max(1, Math.min(60, Math.round(w / tileM)));
+  const repZ = Math.max(1, Math.min(60, Math.round(d / tileM)));
+  const flatMat = usePbrMaterial(mat, "#7c8088", repX, repZ, false);
+  const baseY = elevation + roof.height;
+  const gable = useMemo(
+    () => (roof.kind === "gable" ? buildRoofGable(bounds, baseY, roof.rise, roof.ridgeAxis ?? (w >= d ? "x" : "z")) : null),
+    [roof.kind, roof.rise, roof.ridgeAxis, bounds, baseY, w, d],
+  );
+  useEffect(() => () => gable?.dispose(), [gable]);
+
+  if (roof.kind === "flat") {
+    const th = roof.thickness ?? 0.12;
+    return (
+      <mesh position={[(bounds.minX + bounds.maxX) / 2, baseY + th / 2, (bounds.minZ + bounds.maxZ) / 2]} material={flatMat} castShadow receiveShadow>
+        <boxGeometry args={[w, th, d]} />
+      </mesh>
+    );
+  }
+  if (!gable) return null;
+  return (
+    <mesh geometry={gable} castShadow receiveShadow>
+      <meshStandardMaterial color={mat?.color ?? "#9a6a4a"} roughness={mat?.roughness ?? 0.85} metalness={mat?.metalness ?? 0} side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
 /** Encuadra la cámara 3D para ver todo (lo dispara el MCP vía renderre_fit_view_3d). */
 function Fit3D() {
   const camera = useThree((s) => s.camera);
@@ -285,7 +411,18 @@ function Scene() {
   const floors = useEditor((s) => s.floors);
   const selection = useEditor((s) => s.selection);
   const multi = useEditor((s) => s.multi);
+  const roofs = useEditor((s) => s.roofs);
+  const render = useEditor((s) => s.render);
   const getMat = (id?: string) => materials.find((m) => m.id === id);
+  // Posición del sol a partir de azimut/elevación (esféricas → cartesianas).
+  const az = (render.sunAzimuth * Math.PI) / 180;
+  const el = (render.sunElevation * Math.PI) / 180;
+  const sunR = 18;
+  const sunPos: [number, number, number] = [
+    sunR * Math.cos(el) * Math.sin(az),
+    Math.max(0.5, sunR * Math.sin(el)),
+    sunR * Math.cos(el) * Math.cos(az),
+  ];
   const elevOf = (lvl?: number) => floors[lvl ?? 0]?.elevation ?? 0;
   const sel = new Set(selectedRefs(selection, multi).map((r) => `${r.kind}:${r.id}`));
 
@@ -306,15 +443,31 @@ function Scene() {
     })
     .filter((s): s is { lvl: number; minX: number; maxX: number; minZ: number; maxZ: number; y: number } => s !== null);
 
+  // Techos: cubren la huella de los MUROS del nivel (+ alero/overhang).
+  const roofsR = roofs
+    .map((r) => {
+      let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity, has = false;
+      for (const w of walls) if ((w.level ?? 0) === r.level) {
+        for (const p of [w.a, w.b]) {
+          minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+          minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); has = true;
+        }
+      }
+      if (!has) return null;
+      const o = r.overhang ?? 0;
+      return { roof: r, bounds: { minX: minX - o, maxX: maxX + o, minZ: minZ - o, maxZ: maxZ + o }, elevation: floors[r.level]?.elevation ?? 0 };
+    })
+    .filter((x): x is { roof: Roof; bounds: Bounds3; elevation: number } => x !== null);
+
   return (
     <>
-      <color attach="background" args={["#0b0e14"]} />
+      <color attach="background" args={[render.background]} />
       <hemisphereLight args={["#dfe7ff", "#1a1a1a", 0.55]} />
-      <ambientLight intensity={0.25} />
+      <ambientLight intensity={render.ambient} />
       <directionalLight
-        position={[8, 14, 6]}
-        intensity={1.25}
-        castShadow
+        position={sunPos}
+        intensity={render.sunIntensity}
+        castShadow={render.shadows}
         shadow-mapSize={[2048, 2048]}
         shadow-camera-left={-20}
         shadow-camera-right={20}
@@ -326,7 +479,10 @@ function Scene() {
 
       <Floor mat={getMat(floorMaterialId)} />
       {slabs.map((s) => (
-        <FloorSlab key={s.lvl} minX={s.minX} maxX={s.maxX} minZ={s.minZ} maxZ={s.maxZ} y={s.y} mat={getMat(floorMaterialId)} />
+        <FloorSlab key={s.lvl} minX={s.minX} maxX={s.maxX} minZ={s.minZ} maxZ={s.maxZ} y={s.y} mat={getMat(floors[s.lvl]?.materialId ?? floorMaterialId)} />
+      ))}
+      {roofsR.map((r) => (
+        <Roof3D key={r.roof.id} roof={r.roof} bounds={r.bounds} elevation={r.elevation} mat={getMat(r.roof.materialId)} />
       ))}
 
       <Grid

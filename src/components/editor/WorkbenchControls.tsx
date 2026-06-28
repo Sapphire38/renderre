@@ -321,8 +321,12 @@ export default function WorkbenchControls() {
         <Num label="Profundidad" value={Math.round(draft.depth * 100)} unit="cm" min={5} max={120} onChange={(v) => updateDraft({ depth: clamp(v / 100, 0.05, 1.2) })} />
         <Num label="Espesor MDF" value={Math.round(draft.panel * 1000)} unit="mm" min={3} max={50} onChange={(v) => updateDraft({ panel: clamp(v / 1000, 0.003, 0.05) })} />
         <div className="flex items-center justify-between gap-2 py-1">
-          <span className="text-neutral-400">Fondo</span>
-          <input type="checkbox" checked={draft.back !== false} onFocus={beginEdit} onChange={(e) => updateDraft({ back: e.target.checked })} className="h-4 w-4 accent-sky-500" />
+          <span className="text-neutral-400" title="Dibujar la caja (laterales, piso, techo). Apagalo para formas libres como una escalera.">Carcasa (caja)</span>
+          <input type="checkbox" checked={draft.carcass !== false} onFocus={beginEdit} onChange={(e) => updateDraft({ carcass: e.target.checked })} className="h-4 w-4 accent-sky-500" />
+        </div>
+        <div className="flex items-center justify-between gap-2 py-1">
+          <span className={draft.carcass === false ? "text-neutral-600" : "text-neutral-400"}>Fondo</span>
+          <input type="checkbox" checked={draft.back !== false} disabled={draft.carcass === false} onFocus={beginEdit} onChange={(e) => updateDraft({ back: e.target.checked })} className="h-4 w-4 accent-sky-500 disabled:opacity-40" />
         </div>
         <div className="flex items-center justify-between gap-2 py-1">
           <span className="text-neutral-400">Color</span>

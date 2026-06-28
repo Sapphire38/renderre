@@ -15,8 +15,9 @@ export default function FurnitureCatalog() {
 
   if (tool !== "furniture") return null;
 
-  const mdf = FURNITURE_PRESETS.filter((p) => p.category !== "equip");
+  const mdf = FURNITURE_PRESETS.filter((p) => !p.category || p.category === "mdf");
   const equip = FURNITURE_PRESETS.filter((p) => p.category === "equip");
+  const prim = FURNITURE_PRESETS.filter((p) => p.category === "prim");
 
   const cornerBtn =
     "absolute grid h-4 w-4 place-items-center rounded-full bg-neutral-700 text-[9px] leading-none text-neutral-100 shadow hover:bg-sky-600";
@@ -36,7 +37,7 @@ export default function FurnitureCatalog() {
           {Math.round(p.width * 100)}×{Math.round(p.depth * 100)} cm
         </span>
       </button>
-      {p.category !== "equip" && (
+      {(!p.category || p.category === "mdf") && (
         <button
           type="button"
           onClick={() => openWorkbenchFromPreset(p.kind)}
@@ -62,6 +63,15 @@ export default function FurnitureCatalog() {
         Equip.
       </span>
       {equip.map(presetBtn)}
+      {prim.length > 0 && (
+        <>
+          {divider}
+          <span className="self-center px-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+            Prim.
+          </span>
+          {prim.map(presetBtn)}
+        </>
+      )}
       {customLibrary.length > 0 && (
         <>
           {divider}

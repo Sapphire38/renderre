@@ -10,6 +10,7 @@ export type Panel = {
   rotY?: number; // rotación alrededor del pivot
   cylinder?: boolean; // forma cilíndrica (barral, hornalla, etc.)
   cylAxis?: "x" | "y" | "z"; // eje del cilindro (default "x"); largo = size en ese eje, radio = otro
+  shape?: "sphere" | "cone" | "pyramid" | "wedge"; // primitivas no-caja
   color?: string; // color propio del panel
   materialId?: string; // material propio del panel (tiene prioridad sobre color)
 };
@@ -25,7 +26,7 @@ export type FurniturePreset = {
   doors: number;
   baseHeight: number;
   color: string;
-  category?: "mdf" | "equip"; // "equip" = electrodomésticos / sanitarios
+  category?: "mdf" | "equip" | "prim"; // equip = electrodomésticos/objetos · prim = primitivas
 };
 
 const MDF = 0.018; // 18 mm, placa estándar
@@ -51,11 +52,29 @@ export const FURNITURE_PRESETS: FurniturePreset[] = [
   { kind: "nightstand", name: "Mesa de luz", width: 0.45, depth: 0.4, height: 0.5, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#caa472", category: "mdf" },
   { kind: "desk", name: "Escritorio", width: 1.2, depth: 0.6, height: 0.75, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#caa472", category: "mdf" },
   { kind: "vanity", name: "Vanitory (baño)", width: 0.8, depth: 0.5, height: 0.85, panel: MDF, shelves: 0, doors: 2, baseHeight: 0, color: "#d7d2c8", category: "equip" },
+  // --- equipamiento / objetos nuevos ---
+  { kind: "water-heater", name: "Termotanque", width: 0.5, depth: 0.5, height: 1.4, panel: MDF, shelves: 0, doors: 0, baseHeight: 0.4, color: "#dfe2e5", category: "equip" },
+  { kind: "bathtub", name: "Bañera", width: 1.7, depth: 0.75, height: 0.58, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#eef1f3", category: "equip" },
+  { kind: "shower", name: "Ducha", width: 0.9, depth: 0.9, height: 2.0, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#cfe3ea", category: "equip" },
+  { kind: "chair", name: "Silla", width: 0.45, depth: 0.48, height: 0.9, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#8a6b4f", category: "equip" },
+  { kind: "plant", name: "Planta", width: 0.45, depth: 0.45, height: 1.0, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#3f7d3a", category: "equip" },
+  { kind: "round-table", name: "Mesa redonda", width: 1.1, depth: 1.1, height: 0.75, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#b98b5e", category: "equip" },
+  { kind: "coffee-table", name: "Mesa ratona", width: 1.0, depth: 0.55, height: 0.4, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#b98b5e", category: "equip" },
+  { kind: "stairs", name: "Escalera", width: 1.0, depth: 3.0, height: 2.7, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#c2c5c9", category: "equip" },
+  // --- primitivas ---
+  { kind: "prim-box", name: "Caja", width: 0.5, depth: 0.5, height: 0.5, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#9aa3ad", category: "prim" },
+  { kind: "prim-cylinder", name: "Cilindro", width: 0.5, depth: 0.5, height: 0.8, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#9aa3ad", category: "prim" },
+  { kind: "prim-sphere", name: "Esfera", width: 0.6, depth: 0.6, height: 0.6, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#9aa3ad", category: "prim" },
+  { kind: "prim-cone", name: "Cono", width: 0.6, depth: 0.6, height: 0.9, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#9aa3ad", category: "prim" },
+  { kind: "prim-pyramid", name: "Pirámide", width: 0.6, depth: 0.6, height: 0.7, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#9aa3ad", category: "prim" },
+  { kind: "prim-wedge", name: "Rampa/cuña", width: 1.0, depth: 0.6, height: 0.5, panel: MDF, shelves: 0, doors: 0, baseHeight: 0, color: "#9aa3ad", category: "prim" },
 ];
 
 const APPLIANCE_KINDS = new Set<FurnitureKind>([
   "tv", "fridge", "stove", "sink", "washer", "toilet", "bed", "sofa",
   "tv-stand", "nightstand", "desk", "vanity",
+  "water-heater", "bathtub", "shower", "chair", "plant", "round-table", "coffee-table", "stairs",
+  "prim-box", "prim-cylinder", "prim-sphere", "prim-cone", "prim-pyramid", "prim-wedge",
 ]);
 export const isAppliance = (k: FurnitureKind) => APPLIANCE_KINDS.has(k);
 
@@ -245,6 +264,7 @@ export function makeCustomFurniture(): Furniture {
     color: "#c9b18b",
     components: [],
     back: true,
+    carcass: true,
   };
 }
 
@@ -285,12 +305,14 @@ export function buildCustomPanels(f: Furniture): Panel[] {
   const inW = Math.max(W - 2 * t, 0.02);
   const panels: Panel[] = [];
 
-  // carcasa
-  panels.push({ pos: [-(W / 2 - t / 2), base + H / 2, 0], size: [t, H, D] });
-  panels.push({ pos: [W / 2 - t / 2, base + H / 2, 0], size: [t, H, D] });
-  panels.push({ pos: [0, base + t / 2, 0], size: [inW, t, D] });
-  panels.push({ pos: [0, base + H - t / 2, 0], size: [inW, t, D] });
-  if (f.back !== false) panels.push({ pos: [0, base + H / 2, D / 2 - t / 2], size: [inW, H - 2 * t, t] });
+  // carcasa (caja). Se puede desactivar para hacer formas libres (ej. una escalera).
+  if (f.carcass !== false) {
+    panels.push({ pos: [-(W / 2 - t / 2), base + H / 2, 0], size: [t, H, D] });
+    panels.push({ pos: [W / 2 - t / 2, base + H / 2, 0], size: [t, H, D] });
+    panels.push({ pos: [0, base + t / 2, 0], size: [inW, t, D] });
+    panels.push({ pos: [0, base + H - t / 2, 0], size: [inW, t, D] });
+    if (f.back !== false) panels.push({ pos: [0, base + H / 2, D / 2 - t / 2], size: [inW, H - 2 * t, t] });
+  }
 
   const cx = (x: number, w: number) => -W / 2 + x + w / 2;
   const cyTop = (y: number, h: number) => base + y + h / 2;
@@ -409,12 +431,24 @@ export function appliancePanels(f: Furniture): Panel[] {
       axis === "y" ? [dia, len, dia] : axis === "z" ? [dia, dia, len] : [len, dia, dia];
     P.push({ pos: [cx, base + cy, cz], size, cylinder: true, cylAxis: axis, color });
   };
+  const prim = (shape: "sphere" | "cone" | "pyramid" | "wedge", cx: number, cy: number, cz: number, w: number, h: number, d: number, color: string) =>
+    P.push({ pos: [cx, base + cy, cz], size: [Math.max(w, 0.005), Math.max(h, 0.005), Math.max(d, 0.005)], shape, color });
   const body = f.color;
   const dark = "#23262b";
   const black = "#101216";
   const metal = "#aeb4ba";
   const basin = "#dfe3e6";
   const legC = "#3a3f45";
+  const shade = (hex: string, amt: number) => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+    if (!m) return hex;
+    const n = parseInt(m[1], 16);
+    const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+    const r = clamp(((n >> 16) & 255) + amt * 255);
+    const g = clamp(((n >> 8) & 255) + amt * 255);
+    const b = clamp((n & 255) + amt * 255);
+    return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+  };
 
   switch (f.kind) {
     case "tv":
@@ -518,6 +552,82 @@ export function appliancePanels(f: Furniture): Panel[] {
       cyl(0, H + 0.22, D / 2 - 0.15, 0.025, 0.1, "z", metal);
       break;
     }
+    case "water-heater": {
+      const dia = Math.min(W, D);
+      cyl(0, H / 2, 0, dia, H, "y", body);
+      cyl(0, H + 0.02, 0, dia * 0.9, 0.04, "y", "#b9bec4");
+      box(0, H * 0.3, -dia / 2 - 0.004, dia * 0.5, 0.18, 0.02, "#c2c7cc");
+      break;
+    }
+    case "bathtub":
+      box(0, H / 2, 0, W, H, D, body);
+      box(0, H * 0.62, 0, W * 0.86, H * 0.66, D * 0.7, "#cfd6da");
+      cyl(-W / 2 + 0.12, H + 0.06, 0, 0.03, 0.18, "y", metal);
+      break;
+    case "shower":
+      box(0, 0.04, 0, W, 0.08, D, "#cdd3d8");
+      box(0, H / 2 + 0.04, -D / 2 + 0.01, W, H, 0.02, "#bcd5de");
+      box(-W / 2 + 0.01, H / 2 + 0.04, 0, 0.02, H, D, "#bcd5de");
+      cyl(W * 0.28, H, -D * 0.28, 0.07, 0.04, "y", metal);
+      cyl(W * 0.28, H - 0.18, -D * 0.28, 0.018, 0.36, "y", metal);
+      break;
+    case "chair": {
+      const seatH = H * 0.5;
+      box(0, seatH, 0, W, 0.05, D, body);
+      box(0, seatH + (H - seatH) / 2, -D / 2 + 0.03, W, H - seatH, 0.05, body);
+      const clx = W / 2 - 0.04, clz = D / 2 - 0.04;
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) cyl(sx * clx, seatH / 2, sz * clz, 0.04, seatH, "y", shade(body, -0.1));
+      break;
+    }
+    case "plant": {
+      const dia = Math.min(W, D);
+      cyl(0, 0.16, 0, dia * 0.7, 0.32, "y", "#8a5a3c");
+      prim("sphere", 0, H - dia * 0.55, 0, dia * 1.15, dia * 1.15, dia * 1.15, body);
+      prim("sphere", dia * 0.2, H - dia * 0.2, dia * 0.1, dia * 0.7, dia * 0.7, dia * 0.7, shade(body, 0.06));
+      break;
+    }
+    case "round-table":
+      cyl(0, H - 0.02, 0, W, 0.04, "y", body);
+      cyl(0, (H - 0.04) / 2, 0, 0.1, H - 0.04, "y", "#6b6f76");
+      cyl(0, 0.02, 0, W * 0.4, 0.04, "y", "#6b6f76");
+      break;
+    case "coffee-table": {
+      box(0, H - 0.02, 0, W, 0.04, D, body);
+      const tlx = W / 2 - 0.06, tlz = D / 2 - 0.06;
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) cyl(sx * tlx, (H - 0.04) / 2, sz * tlz, 0.05, H - 0.04, "y", shade(body, -0.1));
+      break;
+    }
+    case "stairs": {
+      const n = Math.max(2, Math.round(H / 0.18));
+      const rise = H / n;
+      const run = D / n;
+      for (let i = 0; i < n; i++) {
+        const stepH = (i + 1) * rise;
+        const z = -D / 2 + (i + 0.5) * run;
+        box(0, stepH / 2, z, W, stepH, run, i % 2 === 0 ? body : shade(body, -0.04));
+      }
+      break;
+    }
+    case "prim-box":
+      box(0, H / 2, 0, W, H, D, body);
+      break;
+    case "prim-cylinder":
+      cyl(0, H / 2, 0, Math.min(W, D), H, "y", body);
+      break;
+    case "prim-sphere": {
+      const dia = Math.min(W, Math.min(D, H));
+      prim("sphere", 0, dia / 2, 0, dia, dia, dia, body);
+      break;
+    }
+    case "prim-cone":
+      prim("cone", 0, H / 2, 0, Math.min(W, D), H, Math.min(W, D), body);
+      break;
+    case "prim-pyramid":
+      prim("pyramid", 0, H / 2, 0, W, H, D, body);
+      break;
+    case "prim-wedge":
+      prim("wedge", 0, H / 2, 0, W, H, D, body);
+      break;
     default:
       box(0, H / 2, 0, W, H, D, body);
   }

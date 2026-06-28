@@ -19,16 +19,47 @@ export type Wall = {
   a: Vec2;
   b: Vec2;
   thickness: number; // metros
-  height: number; // metros
+  height: number; // metros (tope uniforme; sirve de fallback de heightA/heightB)
   materialId?: string;
   level?: number; // piso/nivel (default 0)
   name?: string; // nombre opcional
+  /** Altura de arranque desde el piso del nivel (default 0). Permite medios-muros/antepechos elevados. */
+  base?: number;
+  /** Altura del tope en el extremo A (default = height). Si difiere de heightB, el tope queda inclinado (muro a dos aguas). */
+  heightA?: number;
+  /** Altura del tope en el extremo B (default = height). */
+  heightB?: number;
 };
 
 /** Un piso/nivel del proyecto. */
 export type Floor = {
   name: string;
   elevation: number; // altura de arranque del nivel, en metros
+  materialId?: string; // material propio del suelo de este nivel (si falta, usa el global)
+};
+
+/** Ajustes de iluminación/render de la escena 3D. */
+export type RenderSettings = {
+  sunAzimuth: number; // grados, dirección del sol en planta (0..360)
+  sunElevation: number; // grados sobre el horizonte (0..90)
+  sunIntensity: number; // 0..3
+  ambient: number; // luz ambiente 0..2
+  background: string; // color de fondo / cielo (hex)
+  shadows: boolean; // proyectar sombras
+};
+
+/** Un techo sobre un nivel: cubre la huella de los muros de ese piso. */
+export type RoofKind = "flat" | "gable";
+export type Roof = {
+  id: string;
+  level: number; // nivel sobre el que apoya
+  kind: RoofKind;
+  height: number; // altura de los aleros (desde el piso del nivel) donde apoya el techo
+  rise: number; // cuánto sube la cumbrera sobre los aleros (solo gable)
+  overhang: number; // alero que sobresale del perímetro (m)
+  ridgeAxis?: "x" | "z"; // dirección de la cumbrera (gable); default = lado más largo
+  thickness?: number; // espesor de la losa/faldón (default 0.12)
+  materialId?: string;
 };
 
 /** Tipos de mueble paramétrico de MDF. */
@@ -53,7 +84,23 @@ export type FurnitureKind =
   | "tv-stand" // mueble TV / rack
   | "nightstand" // mesa de luz
   | "desk" // escritorio
-  | "vanity"; // mesada de baño con bacha
+  | "vanity" // mesada de baño con bacha
+  // equipamiento / objetos nuevos
+  | "water-heater" // termotanque
+  | "bathtub" // bañera
+  | "shower" // ducha
+  | "chair" // silla
+  | "plant" // planta decorativa
+  | "round-table" // mesa redonda
+  | "coffee-table" // mesa ratona
+  | "stairs" // escalera
+  // primitivas (formas básicas para construir cualquier cosa)
+  | "prim-box"
+  | "prim-cylinder"
+  | "prim-sphere"
+  | "prim-cone"
+  | "prim-pyramid"
+  | "prim-wedge";
 
 /** Componente de un mueble custom, ubicado por un rectángulo en la cara frontal. */
 export type ComponentKind =
@@ -105,6 +152,8 @@ export type Furniture = {
   /** Solo kind === "custom": componentes del mueble armado en el taller. */
   components?: FurnitureComponent[];
   back?: boolean; // tiene panel de fondo (custom). default true
+  /** custom: dibujar la carcasa/caja (laterales+piso+techo+fondo). default true. false = solo componentes (formas libres, ej. una escalera). */
+  carcass?: boolean;
 };
 
 /** Abertura (puerta o ventana) asociada a un muro. Medidas en metros. */
@@ -159,6 +208,8 @@ export type ProjectData = {
   floors?: Floor[]; // pisos/niveles (default: 1 planta baja)
   activeLevel?: number;
   floorMaterialId?: string;
+  roofs?: Roof[]; // techos por nivel
+  render?: RenderSettings; // iluminación / fondo
   grid: GridSettings;
   wallDefaults: WallDefaults;
 };
@@ -169,4 +220,14 @@ export type SavedProject = {
   data: ProjectData;
 };
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 8;
+
+/** Render por defecto. */
+export const DEFAULT_RENDER: RenderSettings = {
+  sunAzimuth: 135,
+  sunElevation: 55,
+  sunIntensity: 1.25,
+  ambient: 0.25,
+  background: "#0b0e14",
+  shadows: true,
+};
