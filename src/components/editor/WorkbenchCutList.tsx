@@ -3,10 +3,19 @@
 import { useMemo, useState } from "react";
 import { useEditor } from "@/lib/store";
 import { cutList, hardwareOf, budgetOf } from "@/lib/cutlist";
+import { nest } from "@/lib/nesting";
 import type { Pricing } from "@/lib/types";
 
 const money = (n: number) => "$ " + Math.round(n).toLocaleString("es-AR");
 const mm = (m: number) => Math.round(m * 1000);
+
+// Paleta estable por rol para colorear las piezas en el plano de corte.
+const ROLE_COLORS = ["#38bdf8", "#34d399", "#f59e0b", "#a78bfa", "#f472b6", "#facc15", "#fb7185", "#22d3ee", "#a3e635"];
+function roleColor(role: string): string {
+  let h = 0;
+  for (let i = 0; i < role.length; i++) h = (h * 31 + role.charCodeAt(i)) >>> 0;
+  return ROLE_COLORS[h % ROLE_COLORS.length];
+}
 
 function PriceField({
   label,
@@ -42,6 +51,7 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
   const setPricing = useEditor((s) => s.setPricing);
   const materials = useEditor((s) => s.materials);
   const [showPrices, setShowPrices] = useState(false);
+  const [tab, setTab] = useState<"list" | "cut">("list");
 
   const { pieces, hw, budget } = useMemo(() => {
     if (!draft) return { pieces: [], hw: { hinges: 0, slides: 0, pulls: 0, rods: 0 }, budget: null };
@@ -49,6 +59,8 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
     const h = hardwareOf(draft);
     return { pieces: p, hw: h, budget: budgetOf(p, h, pricing) };
   }, [draft, pricing]);
+
+  const nesting = useMemo(() => nest(pieces, pricing.boardW, pricing.boardH), [pieces, pricing.boardW, pricing.boardH]);
 
   if (!draft || !budget) return null;
 
@@ -80,13 +92,34 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
   const set = (patch: Partial<Pricing>) => setPricing(patch);
   const card = "rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2";
 
+  // El nesting da el conteo REAL de placas; recalculamos costo de material e importe total con él.
+  const boards = nesting.totalBoards;
+  const materialCost = boards * pricing.boardPrice;
+  const total = materialCost + budget.cost.edge + budget.cost.hardware + budget.cost.labor;
+
   return (
     <div className="absolute inset-0 z-10 flex flex-col bg-neutral-950">
       <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-4 py-2.5">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-neutral-100">Despiece y presupuesto</span>
           <span className="text-neutral-600">·</span>
           <span className="text-sm text-neutral-400">{draft.name}</span>
+          <div className="ml-2 flex rounded-md border border-neutral-800 p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setTab("list")}
+              className={["rounded px-2.5 py-1", tab === "list" ? "bg-sky-500/20 text-sky-200" : "text-neutral-400 hover:text-neutral-200"].join(" ")}
+            >
+              Despiece
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("cut")}
+              className={["rounded px-2.5 py-1", tab === "cut" ? "bg-sky-500/20 text-sky-200" : "text-neutral-400 hover:text-neutral-200"].join(" ")}
+            >
+              Plano de corte
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -118,8 +151,8 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
             <div className="text-lg font-semibold text-neutral-100">{budget.area.toFixed(2)} m²</div>
           </div>
           <div className={card}>
-            <div className="text-[11px] uppercase tracking-wide text-neutral-500">Placas a comprar</div>
-            <div className="text-lg font-semibold text-neutral-100">{budget.boards}</div>
+            <div className="text-[11px] uppercase tracking-wide text-neutral-500">Placas ({Math.round(nesting.yield * 100)}% aprov.)</div>
+            <div className="text-lg font-semibold text-neutral-100">{boards}</div>
           </div>
           <div className={card}>
             <div className="text-[11px] uppercase tracking-wide text-neutral-500">Canto</div>
@@ -127,10 +160,13 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
           </div>
           <div className="rounded-lg border border-sky-700/60 bg-sky-950/40 px-3 py-2">
             <div className="text-[11px] uppercase tracking-wide text-sky-400/80">Total estimado</div>
-            <div className="text-lg font-semibold text-sky-200">{money(budget.cost.total)}</div>
+            <div className="text-lg font-semibold text-sky-200">{money(total)}</div>
           </div>
         </div>
 
+        {tab === "cut" ? (
+          <CutPlan nesting={nesting} />
+        ) : (
         <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
           {/* Despiece */}
           <div>
@@ -189,12 +225,12 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
           <div>
             <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Costos</h3>
             <div className="space-y-1.5 rounded-lg border border-neutral-800 bg-neutral-900 p-3 text-sm">
-              <div className="flex justify-between"><span className="text-neutral-400">Placas ({budget.boards})</span><span className="text-neutral-100">{money(budget.cost.material)}</span></div>
+              <div className="flex justify-between"><span className="text-neutral-400">Placas ({boards})</span><span className="text-neutral-100">{money(materialCost)}</span></div>
               <div className="flex justify-between"><span className="text-neutral-400">Canto ({budget.edgeMeters.toFixed(1)} ml)</span><span className="text-neutral-100">{money(budget.cost.edge)}</span></div>
               <div className="flex justify-between"><span className="text-neutral-400">Herrajes</span><span className="text-neutral-100">{money(budget.cost.hardware)}</span></div>
               <div className="flex justify-between"><span className="text-neutral-400">Mano de obra</span><span className="text-neutral-100">{money(budget.cost.labor)}</span></div>
               <div className="mt-1 flex justify-between border-t border-neutral-800 pt-2 text-base font-semibold">
-                <span className="text-neutral-200">Total</span><span className="text-sky-300">{money(budget.cost.total)}</span>
+                <span className="text-neutral-200">Total</span><span className="text-sky-300">{money(total)}</span>
               </div>
             </div>
 
@@ -217,12 +253,75 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
                 <PriceField label="Tirador ($)" value={pricing.pullPrice} step={50} onChange={(v) => set({ pullPrice: Math.max(0, v) })} />
                 <PriceField label="Barral ($)" value={pricing.rodPrice} step={50} onChange={(v) => set({ rodPrice: Math.max(0, v) })} />
                 <PriceField label="Mano de obra ($/m²)" value={pricing.laborPerM2} step={500} onChange={(v) => set({ laborPerM2: Math.max(0, v) })} />
-                <PriceField label="Aprovechamiento placa (0-1)" value={pricing.yield} step={0.05} onChange={(v) => set({ yield: Math.min(1, Math.max(0.1, v)) })} />
               </div>
             )}
           </div>
         </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+/** Plano de corte: una placa por SVG con las piezas acomodadas. */
+function CutPlan({ nesting }: { nesting: ReturnType<typeof nest> }) {
+  if (nesting.boards.length === 0) {
+    return <p className="py-10 text-center text-neutral-500">No hay piezas de MDF para acomodar.</p>;
+  }
+  const PXM = 150; // px por metro
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-4 text-sm text-neutral-300">
+        <span><b className="text-neutral-100">{nesting.totalBoards}</b> placas · {nesting.boards[0].w.toFixed(2)}×{nesting.boards[0].h.toFixed(2)} m</span>
+        <span>Aprovechamiento <b className="text-sky-300">{Math.round(nesting.yield * 100)}%</b></span>
+        <span className="text-neutral-500">{nesting.usedArea.toFixed(2)} / {nesting.totalArea.toFixed(2)} m²</span>
+        {nesting.unplaced.length > 0 && (
+          <span className="rounded bg-red-950/50 px-2 py-0.5 text-red-300">{nesting.unplaced.length} pieza(s) no entran en la placa</span>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-6">
+        {nesting.boards.map((b) => (
+          <div key={b.index}>
+            <div className="mb-1 text-[11px] text-neutral-400">
+              Placa {b.index + 1} · {Math.round(b.thickness * 1000)} mm
+            </div>
+            <svg
+              width={b.w * PXM}
+              height={b.h * PXM}
+              viewBox={`0 0 ${b.w} ${b.h}`}
+              className="rounded border border-neutral-700 bg-neutral-900"
+            >
+              <rect x={0} y={0} width={b.w} height={b.h} fill="#13161c" />
+              {b.pieces.map((p, i) => (
+                <g key={i}>
+                  <rect
+                    x={p.x}
+                    y={p.y}
+                    width={p.w}
+                    height={p.h}
+                    fill={roleColor(p.role) + "33"}
+                    stroke={roleColor(p.role)}
+                    strokeWidth={0.006}
+                  />
+                  <text
+                    x={p.x + p.w / 2}
+                    y={p.y + p.h / 2}
+                    fill="#e5e7eb"
+                    fontSize={Math.min(0.05, p.h / 3, p.w / 6)}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                  >
+                    {Math.round((p.rot ? p.h : p.w) * 1000)}×{Math.round((p.rot ? p.w : p.h) * 1000)}{p.rot ? " ↻" : ""}
+                  </text>
+                </g>
+              ))}
+            </svg>
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] text-neutral-600">
+        Empaquetado por estantes con giro 90°. Las piezas no se mezclan entre espesores/materiales. Medidas en mm.
+      </p>
     </div>
   );
 }
