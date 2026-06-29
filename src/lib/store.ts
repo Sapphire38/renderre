@@ -7,6 +7,7 @@ import type {
   FurnitureKind,
   GridSettings,
   Material,
+  ModelAsset,
   Opening,
   OpeningKind,
   Pricing,
@@ -16,14 +17,20 @@ import type {
   RoofKind,
   Selection,
   SelRef,
+  Surface,
+  SurfaceShape,
+  Terrain,
   ToolId,
-  Vec2,
   Wall,
   WallDefaults,
+  WallKind,
+  Vec2,
 } from "./types";
 import { uid } from "./geometry";
 import { carcassPanels, customFromPreset, makeComponent, makeCustomFurniture, makeFurniture } from "./furniture";
 import { makeOpening, OPENING_STYLES, defaultStyle } from "./openings";
+import { makeSurface } from "./surfaces";
+import { makeTerrain, sculpt as sculptHeights, type TerrainMode } from "./terrain";
 import { seedMaterials } from "./materials";
 import { DEFAULT_RENDER, DEFAULT_PRICING } from "./types";
 
@@ -38,6 +45,7 @@ const cloneOne = (f: Furniture): Furniture => ({
 });
 const cloneFurniture = (list: Furniture[]): Furniture[] => list.map(cloneOne);
 const cloneOpenings = (list: Opening[]): Opening[] => list.map((o) => ({ ...o }));
+const cloneSurfaces = (list: Surface[]): Surface[] => list.map((s) => ({ ...s, pos: { ...s.pos } }));
 const clampN = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 /** Empuja un snapshot al historial del taller evitando duplicados adyacentes. */
 const pushSnap = (past: Furniture[], snap: Furniture): Furniture[] => {
@@ -57,7 +65,8 @@ export type Toast = { id: string; text: string; kind: ToastKind };
 type ClipItem =
   | { kind: "wall"; data: Wall }
   | { kind: "furniture"; data: Furniture }
-  | { kind: "opening"; data: Opening };
+  | { kind: "opening"; data: Opening }
+  | { kind: "surface"; data: Surface };
 
 const refEq = (a: SelRef, b: SelRef | null): boolean =>
   !!b && a.kind === b.kind && a.id === b.id;
@@ -73,18 +82,22 @@ export function selectedRefs(selection: Selection, multi: SelRef[]): SelRef[] {
   return selection ? [selection] : [];
 }
 
-type Scene = { walls: Wall[]; furniture: Furniture[]; openings: Opening[] };
+type Scene = { walls: Wall[]; furniture: Furniture[]; openings: Opening[]; surfaces: Surface[] };
 const snapshot = (s: Scene): Scene => ({
   walls: cloneWalls(s.walls),
   furniture: cloneFurniture(s.furniture),
   openings: cloneOpenings(s.openings),
+  surfaces: cloneSurfaces(s.surfaces),
 });
 
 export type EditorState = {
   walls: Wall[];
   furniture: Furniture[];
   openings: Opening[];
+  surfaces: Surface[];
+  terrain: Terrain;
   materials: Material[];
+  models: ModelAsset[]; // modelos 3D (.glb) importados
   customLibrary: Furniture[]; // muebles diseñados en el taller
   floors: Floor[];
   activeLevel: number;
@@ -96,6 +109,9 @@ export type EditorState = {
   furnitureKind: FurnitureKind; // preset a colocar con la herramienta "furniture"
   openingKind: OpeningKind; // puerta/ventana a colocar
   openingStyle: string; // estilo de la abertura a colocar
+  wallKind: WallKind; // tipo de muro/cerco a trazar
+  surfaceShape: SurfaceShape; // forma de las nuevas superficies
+  surfaceMaterialId?: string; // material de las nuevas superficies
   selection: Selection;
   multi: SelRef[]; // selección múltiple (marco de arrastre / shift-clic)
   // --- Taller de muebles (transitorio) ---
@@ -117,9 +133,13 @@ export type EditorState = {
   setFurnitureKind: (k: FurnitureKind) => void;
   setOpeningKind: (k: OpeningKind) => void;
   setOpeningStyle: (style: string) => void;
+  setWallKind: (k: WallKind) => void;
+  setSurfaceShape: (s: SurfaceShape) => void;
+  setSurfaceMaterial: (id: string | null) => void;
   selectWall: (id: string | null) => void;
   selectFurniture: (id: string) => void;
   selectOpening: (id: string) => void;
+  selectSurface: (id: string) => void;
   clearSelection: () => void;
   setMulti: (refs: SelRef[]) => void;
   toggleMulti: (ref: SelRef) => void;
@@ -129,10 +149,21 @@ export type EditorState = {
   setWalls: (walls: Wall[]) => void; // sin historial (arrastre)
   setFurniture: (list: Furniture[]) => void; // sin historial (arrastre)
   setOpenings: (list: Opening[]) => void; // sin historial (arrastre)
+  setSurfaces: (list: Surface[]) => void; // sin historial (arrastre)
 
   addWall: (a: Vec2, b: Vec2) => string | null;
   removeWall: (id: string) => void;
   updateWall: (id: string, patch: Partial<Omit<Wall, "id">>) => void;
+
+  addSurface: (pos: Vec2, size?: { width: number; depth: number }) => string;
+  removeSurface: (id: string) => void;
+  updateSurface: (id: string, patch: Partial<Omit<Surface, "id">>) => void;
+
+  // Terreno esculpible (heightfield)
+  setTerrain: (patch: Partial<Terrain>) => void;
+  sculptTerrain: (wx: number, wz: number, radius: number, strength: number, mode: TerrainMode) => void;
+  resizeTerrain: (cols: number, rows: number, cell: number) => void;
+  resetTerrain: () => void;
 
   addFurniture: (kind: FurnitureKind, pos: Vec2, rotDeg?: number) => string;
   addFurnitureObject: (f: Furniture) => string;
@@ -162,6 +193,7 @@ export type EditorState = {
   removeFloor: (i: number) => void;
   renameFloor: (i: number, name: string) => void;
   setFloorElevation: (i: number, elevation: number) => void;
+  setFloorAutoSlab: (i: number, on: boolean) => void;
 
   // Techos (uno por nivel)
   setRoof: (level: number, kind: RoofKind) => void;
@@ -182,6 +214,10 @@ export type EditorState = {
   selectComponent: (id: string | null) => void;
   saveDraftToPlan: () => void;
   placeCustom: (libId: string) => void;
+  // Biblioteca de modelos 3D (.glb) importados
+  addModel: (asset: Omit<ModelAsset, "id">) => string;
+  removeModel: (id: string) => void;
+  placeModel: (id: string) => void;
   // Taller: historial, portapapeles y ajustes finos de componentes
   pushDraftHistory: () => void;
   undoDraft: () => void;
@@ -217,7 +253,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   walls: [],
   furniture: [],
   openings: [],
+  surfaces: [],
+  terrain: { ...makeTerrain(), enabled: false },
   materials: seedMaterials(),
+  models: [],
   customLibrary: [],
   floors: [{ name: "Planta baja", elevation: 0 }],
   activeLevel: 0,
@@ -229,6 +268,9 @@ export const useEditor = create<EditorState>((set, get) => ({
   furnitureKind: "cabinet-base",
   openingKind: "door",
   openingStyle: "swing",
+  wallKind: "solid",
+  surfaceShape: "rect",
+  surfaceMaterialId: undefined,
   selection: null,
   multi: [],
   workbenchOpen: false,
@@ -256,9 +298,13 @@ export const useEditor = create<EditorState>((set, get) => ({
   setFurnitureKind: (k) => set({ furnitureKind: k }),
   setOpeningKind: (k) => set({ openingKind: k, openingStyle: defaultStyle(k) }),
   setOpeningStyle: (style) => set({ openingStyle: style }),
+  setWallKind: (k) => set({ wallKind: k }),
+  setSurfaceShape: (s) => set({ surfaceShape: s }),
+  setSurfaceMaterial: (id) => set({ surfaceMaterialId: id ?? undefined }),
   selectWall: (id) => set({ selection: id ? { kind: "wall", id } : null, multi: [] }),
   selectFurniture: (id) => set({ selection: { kind: "furniture", id }, multi: [] }),
   selectOpening: (id) => set({ selection: { kind: "opening", id }, multi: [] }),
+  selectSurface: (id) => set({ selection: { kind: "surface", id }, multi: [] }),
   clearSelection: () => set({ selection: null, multi: [] }),
   setMulti: (refs) => set({ multi: refs, selection: refs[0] ?? null }),
   toggleMulti: (ref) =>
@@ -274,10 +320,11 @@ export const useEditor = create<EditorState>((set, get) => ({
   setWalls: (walls) => set({ walls, dirty: true }),
   setFurniture: (list) => set({ furniture: list, dirty: true }),
   setOpenings: (list) => set({ openings: list, dirty: true }),
+  setSurfaces: (list) => set({ surfaces: list, dirty: true }),
 
   addWall: (a, b) => {
     if (Math.hypot(b.x - a.x, b.z - a.z) < MIN_LEN) return null;
-    const { wallDefaults } = get();
+    const { wallDefaults, wallKind } = get();
     const w: Wall = {
       id: uid(),
       a: { ...a },
@@ -285,6 +332,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       thickness: wallDefaults.thickness,
       height: wallDefaults.height,
       level: get().activeLevel,
+      ...(wallKind !== "solid" ? { kind: wallKind } : {}),
     };
     get().pushHistory();
     set((s) => ({ walls: [...s.walls, w], dirty: true }));
@@ -314,6 +362,53 @@ export const useEditor = create<EditorState>((set, get) => ({
       dirty: true,
     }));
   },
+
+  addSurface: (pos, size) => {
+    const s = makeSurface(pos, size);
+    s.level = get().activeLevel;
+    const mid = get().surfaceMaterialId;
+    if (mid) s.materialId = mid;
+    s.shape = get().surfaceShape;
+    get().pushHistory();
+    set((st) => ({
+      surfaces: [...st.surfaces, s],
+      selection: { kind: "surface", id: s.id },
+      multi: [],
+      dirty: true,
+    }));
+    get().pushToast("Superficie agregada");
+    return s.id;
+  },
+  removeSurface: (id) => {
+    get().pushHistory();
+    set((s) => ({
+      surfaces: s.surfaces.filter((x) => x.id !== id),
+      selection: s.selection?.kind === "surface" && s.selection.id === id ? null : s.selection,
+      dirty: true,
+    }));
+  },
+  updateSurface: (id, patch) => {
+    get().pushHistory();
+    set((s) => ({
+      surfaces: s.surfaces.map((x) => (x.id === id ? { ...x, ...patch } : x)),
+      dirty: true,
+    }));
+  },
+
+  // --- Terreno esculpible ---
+  setTerrain: (patch) => set((s) => ({ terrain: { ...s.terrain, ...patch }, dirty: true })),
+  sculptTerrain: (wx, wz, radius, strength, mode) =>
+    set((s) => ({
+      terrain: { ...s.terrain, enabled: true, heights: sculptHeights(s.terrain, wx, wz, radius, strength, mode) },
+      dirty: true,
+    })),
+  resizeTerrain: (cols, rows, cell) =>
+    set((s) => {
+      const next = makeTerrain(Math.max(2, Math.round(cols)), Math.max(2, Math.round(rows)), Math.max(0.1, cell));
+      return { terrain: { ...next, enabled: s.terrain.enabled, materialId: s.terrain.materialId, color: s.terrain.color }, dirty: true };
+    }),
+  resetTerrain: () =>
+    set((s) => ({ terrain: { ...s.terrain, heights: new Array((s.terrain.cols + 1) * (s.terrain.rows + 1)).fill(0) }, dirty: true })),
 
   addFurniture: (kind, pos, rotDeg = 0) => {
     const f = makeFurniture(kind, pos, rotDeg);
@@ -389,11 +484,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     const wallIds = new Set(refs.filter((r) => r.kind === "wall").map((r) => r.id));
     const furnIds = new Set(refs.filter((r) => r.kind === "furniture").map((r) => r.id));
     const openIds = new Set(refs.filter((r) => r.kind === "opening").map((r) => r.id));
+    const surfIds = new Set(refs.filter((r) => r.kind === "surface").map((r) => r.id));
     set((st) => ({
       walls: st.walls.filter((w) => !wallIds.has(w.id)),
       // las aberturas de un muro borrado se van con él
       openings: st.openings.filter((o) => !openIds.has(o.id) && !wallIds.has(o.wallId)),
       furniture: st.furniture.filter((f) => !furnIds.has(f.id)),
+      surfaces: st.surfaces.filter((x) => !surfIds.has(x.id)),
       selection: null,
       multi: [],
       dirty: true,
@@ -401,9 +498,9 @@ export const useEditor = create<EditorState>((set, get) => ({
     get().pushToast(refs.length > 1 ? `${refs.length} eliminados` : "Eliminado");
   },
   clearAll: () => {
-    if (!get().walls.length && !get().furniture.length && !get().openings.length) return;
+    if (!get().walls.length && !get().furniture.length && !get().openings.length && !get().surfaces.length) return;
     get().pushHistory();
-    set({ walls: [], furniture: [], openings: [], selection: null, multi: [], dirty: true });
+    set({ walls: [], furniture: [], openings: [], surfaces: [], selection: null, multi: [], dirty: true });
   },
   applyBatch: (walls, furniture, openings = []) => {
     if (!walls.length && !furniture.length && !openings.length) return;
@@ -438,6 +535,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       } else if (r.kind === "furniture") {
         const f = s.furniture.find((x) => x.id === r.id);
         if (f) clips.push({ kind: "furniture", data: cloneOne(f) });
+      } else if (r.kind === "surface") {
+        const sf = s.surfaces.find((x) => x.id === r.id);
+        if (sf) clips.push({ kind: "surface", data: { ...sf, pos: { ...sf.pos } } });
       } else {
         const o = s.openings.find((x) => x.id === r.id);
         if (o) clips.push({ kind: "opening", data: { ...o } });
@@ -458,6 +558,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const newWalls: Wall[] = [];
     const newFurn: Furniture[] = [];
     const newOpen: Opening[] = [];
+    const newSurf: Surface[] = [];
     const refs: SelRef[] = [];
     let skipped = 0;
     for (const c of clips) {
@@ -474,6 +575,11 @@ export const useEditor = create<EditorState>((set, get) => ({
         const nf: Furniture = { ...cloneOne(f), id: uid(), level: lvl, pos: { x: f.pos.x + OFF, z: f.pos.z + OFF } };
         newFurn.push(nf);
         refs.push({ kind: "furniture", id: nf.id });
+      } else if (c.kind === "surface") {
+        const sf = c.data;
+        const ns: Surface = { ...sf, id: uid(), level: lvl, pos: { x: sf.pos.x + OFF, z: sf.pos.z + OFF } };
+        newSurf.push(ns);
+        refs.push({ kind: "surface", id: ns.id });
       } else {
         const o = c.data;
         const wall = get().walls.find((w) => w.id === o.wallId);
@@ -491,6 +597,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       walls: [...s.walls, ...newWalls],
       furniture: [...s.furniture, ...newFurn],
       openings: [...s.openings, ...newOpen],
+      surfaces: [...s.surfaces, ...newSurf],
       selection: refs[0],
       multi: refs.length > 1 ? refs : [],
       dirty: true,
@@ -509,12 +616,14 @@ export const useEditor = create<EditorState>((set, get) => ({
     const wallIds = new Set(refs.filter((r) => r.kind === "wall").map((r) => r.id));
     const furnIds = new Set(refs.filter((r) => r.kind === "furniture").map((r) => r.id));
     const openIds = new Set(refs.filter((r) => r.kind === "opening").map((r) => r.id));
-    if (wallIds.size || furnIds.size) {
+    const surfIds = new Set(refs.filter((r) => r.kind === "surface").map((r) => r.id));
+    if (wallIds.size || furnIds.size || surfIds.size) {
       set((s) => ({
         walls: s.walls.map((w) =>
           wallIds.has(w.id) ? { ...w, a: { x: w.a.x + dx, z: w.a.z + dz }, b: { x: w.b.x + dx, z: w.b.z + dz } } : w,
         ),
         furniture: s.furniture.map((f) => (furnIds.has(f.id) ? { ...f, pos: { x: f.pos.x + dx, z: f.pos.z + dz } } : f)),
+        surfaces: s.surfaces.map((x) => (surfIds.has(x.id) ? { ...x, pos: { x: x.pos.x + dx, z: x.pos.z + dz } } : x)),
         dirty: true,
       }));
     }
@@ -554,6 +663,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       walls: st.walls.filter((w) => keep(w.level)).map((w) => ({ ...w, level: reidx(w.level) })),
       furniture: st.furniture.filter((f) => keep(f.level)).map((f) => ({ ...f, level: reidx(f.level) })),
       openings: st.openings.filter((o) => keep(o.level)).map((o) => ({ ...o, level: reidx(o.level) })),
+      surfaces: st.surfaces.filter((x) => keep(x.level)).map((x) => ({ ...x, level: reidx(x.level) })),
       roofs: st.roofs.filter((r) => r.level !== i).map((r) => ({ ...r, level: reidx(r.level) })),
       activeLevel: newActive,
       selection: null,
@@ -565,6 +675,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   renameFloor: (i, name) => set((s) => ({ floors: s.floors.map((f, k) => (k === i ? { ...f, name } : f)), dirty: true })),
   setFloorElevation: (i, elevation) =>
     set((s) => ({ floors: s.floors.map((f, k) => (k === i ? { ...f, elevation } : f)), dirty: true })),
+  setFloorAutoSlab: (i, on) =>
+    set((s) => ({ floors: s.floors.map((f, k) => (k === i ? { ...f, autoSlab: on } : f)), dirty: true })),
 
   setRoof: (level, kind) => {
     const s = get();
@@ -581,7 +693,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       roofs: [...st.roofs.filter((r) => r.level !== level), roof],
       dirty: true,
     }));
-    get().pushToast(`Techo ${kind === "gable" ? "a dos aguas" : "plano"} en ${s.floors[level]?.name ?? "el piso"}`);
+    get().pushToast(`Techo ${kind === "gable" ? "a dos aguas" : kind === "shed" ? "de una caída" : "plano"} en ${s.floors[level]?.name ?? "el piso"}`);
   },
   updateRoof: (level, patch) =>
     set((s) => ({ roofs: s.roofs.map((r) => (r.level === level ? { ...r, ...patch } : r)), dirty: true })),
@@ -764,6 +876,43 @@ export const useEditor = create<EditorState>((set, get) => ({
     get().pushToast("Colocado: " + instance.name);
   },
 
+  addModel: (asset) => {
+    const m: ModelAsset = { id: uid(), ...asset };
+    set((s) => ({ models: [...s.models, m], dirty: true }));
+    return m.id;
+  },
+  removeModel: (id) =>
+    set((s) => ({ models: s.models.filter((m) => m.id !== id), dirty: true })),
+  placeModel: (id) => {
+    const m = get().models.find((x) => x.id === id);
+    if (!m) return;
+    const f: Furniture = {
+      id: uid(),
+      kind: "model",
+      name: m.name,
+      pos: { x: 0, z: 0 },
+      rotDeg: 0,
+      width: m.width,
+      depth: m.depth,
+      height: m.height,
+      panel: 0.018,
+      shelves: 0,
+      doors: 0,
+      baseHeight: 0,
+      color: "#9aa3ad",
+      modelUrl: m.dataUrl,
+      level: get().activeLevel,
+    };
+    get().pushHistory();
+    set((s) => ({
+      furniture: [...s.furniture, f],
+      selection: { kind: "furniture", id: f.id },
+      multi: [],
+      dirty: true,
+    }));
+    get().pushToast("Colocado: " + m.name);
+  },
+
   addMaterial: (mat) => {
     const m: Material = { id: uid(), ...mat };
     set((s) => ({ materials: [...s.materials, m], dirty: true }));
@@ -780,11 +929,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!refs.length) return;
     const wallIds = new Set(refs.filter((r) => r.kind === "wall").map((r) => r.id));
     const furnIds = new Set(refs.filter((r) => r.kind === "furniture").map((r) => r.id));
-    if (!wallIds.size && !furnIds.size) return;
+    const surfIds = new Set(refs.filter((r) => r.kind === "surface").map((r) => r.id));
+    if (!wallIds.size && !furnIds.size && !surfIds.size) return;
     get().pushHistory();
     set((s) => ({
       walls: s.walls.map((w) => (wallIds.has(w.id) ? { ...w, materialId: id ?? undefined } : w)),
       furniture: s.furniture.map((f) => (furnIds.has(f.id) ? { ...f, materialId: id ?? undefined } : f)),
+      surfaces: s.surfaces.map((x) => (surfIds.has(x.id) ? { ...x, materialId: id ?? undefined } : x)),
       dirty: true,
     }));
   },
@@ -811,6 +962,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         walls: cloneWalls(prev.walls),
         furniture: cloneFurniture(prev.furniture),
         openings: cloneOpenings(prev.openings),
+        surfaces: cloneSurfaces(prev.surfaces),
         past: s.past.slice(0, -1),
         future: [...s.future, snapshot(s)],
         dirty: true,
@@ -824,6 +976,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         walls: cloneWalls(next.walls),
         furniture: cloneFurniture(next.furniture),
         openings: cloneOpenings(next.openings),
+        surfaces: cloneSurfaces(next.surfaces),
         future: s.future.slice(0, -1),
         past: [...s.past, snapshot(s)],
         dirty: true,
@@ -835,7 +988,10 @@ export const useEditor = create<EditorState>((set, get) => ({
       walls: cloneWalls(data.walls),
       furniture: cloneFurniture(data.furniture ?? []),
       openings: cloneOpenings(data.openings ?? []),
+      surfaces: cloneSurfaces(data.surfaces ?? []),
+      terrain: data.terrain ? { ...data.terrain, origin: { ...data.terrain.origin }, heights: [...data.terrain.heights] } : { ...makeTerrain(), enabled: false },
       materials: data.materials?.length ? data.materials.map((m) => ({ ...m })) : seedMaterials(),
+      models: (data.models ?? []).map((m) => ({ ...m })),
       customLibrary: cloneFurniture(data.customLibrary ?? []),
       floors: data.floors?.length ? data.floors.map((f) => ({ ...f })) : [{ name: "Planta baja", elevation: 0 }],
       activeLevel: data.activeLevel ?? 0,
@@ -861,7 +1017,10 @@ export const useEditor = create<EditorState>((set, get) => ({
       walls: cloneWalls(s.walls),
       furniture: cloneFurniture(s.furniture),
       openings: cloneOpenings(s.openings),
+      surfaces: cloneSurfaces(s.surfaces),
+      terrain: { ...s.terrain, origin: { ...s.terrain.origin }, heights: [...s.terrain.heights] },
       materials: s.materials.map((m) => ({ ...m })),
+      models: s.models.map((m) => ({ ...m })),
       customLibrary: cloneFurniture(s.customLibrary),
       floors: s.floors.map((f) => ({ ...f })),
       activeLevel: s.activeLevel,
@@ -878,7 +1037,10 @@ export const useEditor = create<EditorState>((set, get) => ({
       walls: [],
       furniture: [],
       openings: [],
+      surfaces: [],
+      terrain: { ...makeTerrain(), enabled: false },
       materials: seedMaterials(),
+      models: [],
       customLibrary: [],
       floors: [{ name: "Planta baja", elevation: 0 }],
       activeLevel: 0,

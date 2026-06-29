@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode } from "react";
 import * as THREE from "three";
 import { Canvas, useThree } from "@react-three/fiber";
-import { Grid, OrbitControls } from "@react-three/drei";
+import { Grid, OrbitControls, useGLTF } from "@react-three/drei";
 import { useEditor, selectedRefs } from "@/lib/store";
 import { carcassPanels, footprintCorners } from "@/lib/furniture";
 import { wallPieces } from "@/lib/openings";
-import type { Furniture, Material, Opening, Roof, Wall } from "@/lib/types";
+import { isSolidWall, defaultWallColor, fencePieces } from "@/lib/walls";
+import { modelFor, type ModelDef } from "@/lib/models";
+import { roomPolygons } from "@/lib/rooms";
+import type { Furniture, Material, Opening, Roof, Surface, Vec2, Wall } from "@/lib/types";
 import { ExpandIcon, ShrinkIcon, FullscreenIcon } from "./icons";
+import Terrain3D from "./Terrain3D";
+
+if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
+  (window as unknown as { __rooms?: typeof roomPolygons }).__rooms = roomPolygons;
+}
 
 function shade(hex: string, amt: number): string {
   const n = parseInt(hex.replace("#", ""), 16);
@@ -25,6 +33,8 @@ function usePbrMaterial(
   repeatX: number,
   repeatY: number,
   selected: boolean,
+  opacity = 1,
+  emissive?: string,
 ): THREE.MeshStandardMaterial {
   const material = useMemo(() => {
     if (selected) {
@@ -35,6 +45,16 @@ function usePbrMaterial(
       roughness: mat?.roughness ?? 0.85,
       metalness: mat?.metalness ?? 0,
     });
+    const op = Math.min(opacity, mat?.opacity ?? 1);
+    if (op < 1) {
+      m.transparent = true;
+      m.opacity = op;
+      m.depthWrite = false;
+    }
+    if (emissive) {
+      m.emissive = new THREE.Color(emissive);
+      m.emissiveIntensity = 0.9;
+    }
     if (mat?.albedo) {
       const t = new THREE.TextureLoader().load(mat.albedo);
       t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -52,7 +72,7 @@ function usePbrMaterial(
     m.needsUpdate = true;
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, mat?.id, mat?.albedo, mat?.normal, mat?.color, mat?.roughness, mat?.metalness, repeatX, repeatY, fallbackColor]);
+  }, [selected, mat?.id, mat?.albedo, mat?.normal, mat?.color, mat?.roughness, mat?.metalness, mat?.opacity, repeatX, repeatY, fallbackColor, opacity, emissive]);
 
   useEffect(() => {
     return () => {
@@ -76,6 +96,9 @@ function BoxPiece({
   cylinder,
   cylAxis,
   shape,
+  opacity = 1,
+  emissive,
+  rot,
 }: {
   pos: [number, number, number];
   size: [number, number, number];
@@ -87,6 +110,9 @@ function BoxPiece({
   cylinder?: boolean;
   cylAxis?: "x" | "y" | "z";
   shape?: "sphere" | "cone" | "pyramid" | "wedge";
+  opacity?: number;
+  emissive?: string;
+  rot?: [number, number, number];
 }) {
   const tileM = mat?.tileM ?? 1;
   const dims = [...size].sort((a, b) => b - a);
@@ -96,6 +122,8 @@ function BoxPiece({
     Math.max(1, Math.round(dims[0] / tileM)),
     Math.max(1, Math.round(dims[1] / tileM)),
     selected,
+    opacity,
+    emissive,
   );
   // Geometría de cuña (prisma triangular) construida a mano; rampa que sube en +X.
   const wedgeGeom = useMemo(() => {
@@ -134,18 +162,23 @@ function BoxPiece({
     }
   }
 
+  // Inclinación propia de la pieza (capó/parabrisas/proa), compuesta con la rotación de la geometría.
+  const finalRot: [number, number, number] | undefined = rot
+    ? [(meshRot?.[0] ?? 0) + rot[0], (meshRot?.[1] ?? 0) + rot[1], (meshRot?.[2] ?? 0) + rot[2]]
+    : meshRot;
+
   if (pivot && rotY) {
     const local: [number, number, number] = [pos[0] - pivot[0], pos[1] - pivot[1], pos[2] - pivot[2]];
     return (
       <group position={pivot} rotation={[0, rotY, 0]}>
-        <mesh position={local} rotation={meshRot} material={material} castShadow receiveShadow>
+        <mesh position={local} rotation={finalRot} material={material} castShadow receiveShadow>
           {geom}
         </mesh>
       </group>
     );
   }
   return (
-    <mesh position={pos} rotation={meshRot} material={material} castShadow receiveShadow>
+    <mesh position={pos} rotation={finalRot} material={material} castShadow receiveShadow>
       {geom}
     </mesh>
   );
@@ -172,6 +205,15 @@ function Wall3D({
   const topB = wall.heightB ?? wall.height;
   const topMin = Math.min(topA, topB);
   const bodyH = Math.max(topMin - base, 0.01);
+  const kind = wall.kind ?? "solid";
+  const solid = isSolidWall(kind);
+  const kindColor = defaultWallColor(kind);
+  const glassOpacity = kind === "glass" ? 0.3 : 1;
+  // Cercos calados (alambrado/reja/cerco de madera): postes + barrotes/alambres.
+  const fenceBoxes = useMemo(
+    () => (!solid ? fencePieces(len, bodyH, wall.thickness, kind) : []),
+    [solid, len, bodyH, wall.thickness, kind],
+  );
   // El cuerpo rectangular (con aberturas) va de la base hasta el tope más bajo.
   const bodyWall = useMemo<Wall>(
     () => ({ ...wall, base: 0, height: bodyH, heightA: undefined, heightB: undefined }),
@@ -202,45 +244,57 @@ function Wall3D({
   if (len < 1e-4) return null;
   const mx = (wall.a.x + wall.b.x) / 2;
   const mz = (wall.a.z + wall.b.z) / 2;
-  const gableColor = selected ? "#38bdf8" : mat?.color ?? "#d6d3cd";
+  const rotY = Math.atan2(-dz, dx);
+
+  // Cerco calado: una caja por poste/barrote/alambre.
+  if (!solid) {
+    return (
+      <group position={[mx, yOffset + base, mz]} rotation={[0, rotY, 0]}>
+        {fenceBoxes.map((b, i) => (
+          <BoxPiece key={i} pos={b.pos} size={b.size} mat={mat} fallbackColor={kindColor} selected={selected} />
+        ))}
+      </group>
+    );
+  }
+
+  const gableColor = selected ? "#38bdf8" : mat?.color ?? kindColor;
   return (
-    <group position={[mx, yOffset + base, mz]} rotation={[0, Math.atan2(-dz, dx), 0]}>
+    <group position={[mx, yOffset + base, mz]} rotation={[0, rotY, 0]}>
       {pieces.map((p, i) => (
         <BoxPiece
           key={i}
           pos={[p.x, p.yc, 0]}
           size={[p.w, p.h, wall.thickness]}
           mat={mat}
-          fallbackColor="#d6d3cd"
+          fallbackColor={kindColor}
           selected={selected}
+          opacity={glassOpacity}
         />
       ))}
       {gableGeom && (
         <mesh geometry={gableGeom} castShadow receiveShadow>
-          <meshStandardMaterial color={gableColor} roughness={mat?.roughness ?? 0.85} metalness={mat?.metalness ?? 0} />
+          <meshStandardMaterial color={gableColor} roughness={mat?.roughness ?? 0.85} metalness={mat?.metalness ?? 0} transparent={glassOpacity < 1} opacity={glassOpacity} />
         </mesh>
       )}
     </group>
   );
 }
 
-function Furniture3D({
+/** Modelo procedural (cajas) de un mueble/objeto. */
+function ProceduralFurniture({
   f,
   mat,
   materials,
   selected,
-  yOffset = 0,
 }: {
   f: Furniture;
   mat?: Material;
   materials: Material[];
   selected: boolean;
-  yOffset?: number;
 }) {
   const panels = useMemo(() => carcassPanels(f), [f]);
-  const a = (f.rotDeg * Math.PI) / 180;
   return (
-    <group position={[f.pos.x, yOffset, f.pos.z]} rotation={[0, -a, 0]}>
+    <>
       {panels.map((p, i) => {
         const panelMat = p.materialId ? materials.find((m) => m.id === p.materialId) : p.color ? undefined : mat;
         return (
@@ -256,9 +310,85 @@ function Furniture3D({
             cylinder={p.cylinder}
             cylAxis={p.cylAxis}
             shape={p.shape}
+            emissive={p.emissive}
+            opacity={p.opacity ?? 1}
+            rot={p.rot}
           />
         );
       })}
+    </>
+  );
+}
+
+/** Modelo externo (.glb) auto-escalado a las dimensiones del mueble. Suspende mientras carga. */
+function GltfModel({ f, model }: { f: Furniture; model: ModelDef }) {
+  const { scene } = useGLTF(model.url);
+  const obj = useMemo(() => {
+    const c = scene.clone(true);
+    const box = new THREE.Box3().setFromObject(c);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    let s = model.scale ?? 1;
+    if (model.scale == null && model.fit !== false) {
+      s = Math.min(f.width / (size.x || 1), f.depth / (size.z || 1));
+      if (!Number.isFinite(s) || s <= 0) s = 1;
+    }
+    c.scale.setScalar(s);
+    c.position.set(-center.x * s, -box.min.y * s + (model.yOffset ?? 0), -center.z * s);
+    c.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; }
+    });
+    return c;
+  }, [scene, f.width, f.depth, model.scale, model.fit, model.yOffset]);
+  return (
+    <group position={[0, f.baseHeight, 0]} rotation={[0, ((model.rotDeg ?? 0) * Math.PI) / 180, 0]}>
+      <primitive object={obj} />
+    </group>
+  );
+}
+
+/** Si el .glb falla (ausente/ inválido), cae al modelo procedural. */
+class ModelBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch() {
+    /* el fallback procedural ya cubre el caso; no rompemos la escena */
+  }
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+function Furniture3D({
+  f,
+  mat,
+  materials,
+  selected,
+  yOffset = 0,
+}: {
+  f: Furniture;
+  mat?: Material;
+  materials: Material[];
+  selected: boolean;
+  yOffset?: number;
+}) {
+  const a = (f.rotDeg * Math.PI) / 180;
+  const model: ModelDef | undefined = f.modelUrl ? { url: f.modelUrl, fit: true } : modelFor(f.kind);
+  const procedural = <ProceduralFurniture f={f} mat={mat} materials={materials} selected={selected} />;
+  return (
+    <group position={[f.pos.x, yOffset, f.pos.z]} rotation={[0, -a, 0]}>
+      {model ? (
+        <ModelBoundary fallback={procedural}>
+          <Suspense fallback={procedural}>
+            <GltfModel f={f} model={model} />
+          </Suspense>
+        </ModelBoundary>
+      ) : (
+        procedural
+      )}
     </group>
   );
 }
@@ -275,32 +405,73 @@ function Floor({ mat }: { mat?: Material }) {
 }
 
 /** Losa de piso de un nivel: cubre la huella (muros + muebles) a la altura del nivel. */
-function FloorSlab({
-  minX,
-  maxX,
-  minZ,
-  maxZ,
-  y,
-  mat,
-}: {
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-  y: number;
-  mat?: Material;
-}) {
-  const w = Math.max(maxX - minX, 0.2);
-  const d = Math.max(maxZ - minZ, 0.2);
+/** Piso de un ambiente: losa fina con la forma del polígono del recinto (no una caja). */
+function RoomFloor({ poly, y, mat }: { poly: Vec2[]; y: number; mat?: Material }) {
   const tileM = mat?.tileM ?? 1;
-  const repX = Math.max(1, Math.min(60, Math.round(w / tileM)));
-  const repZ = Math.max(1, Math.min(60, Math.round(d / tileM)));
-  const material = usePbrMaterial(mat, "#171c28", repX, repZ, false);
-  const th = 0.06;
+  const geom = useMemo(() => {
+    const shape = new THREE.Shape();
+    poly.forEach((p, i) => (i ? shape.lineTo(p.x, p.z) : shape.moveTo(p.x, p.z)));
+    shape.closePath();
+    const g = new THREE.ExtrudeGeometry(shape, { depth: 0.06, bevelEnabled: false });
+    return g;
+  }, [poly]);
+  useEffect(() => () => geom.dispose(), [geom]);
+
+  const material = useMemo(() => {
+    const m = new THREE.MeshStandardMaterial({ color: mat?.color ?? "#171c28", roughness: mat?.roughness ?? 0.9, metalness: mat?.metalness ?? 0 });
+    if (mat?.albedo) {
+      const t = new THREE.TextureLoader().load(mat.albedo);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(1 / tileM, 1 / tileM); // uv en metros → una repetición cada tileM
+      t.colorSpace = THREE.SRGBColorSpace;
+      m.map = t;
+      m.color.set("#ffffff");
+    }
+    if (mat?.normal) {
+      const n = new THREE.TextureLoader().load(mat.normal);
+      n.wrapS = n.wrapT = THREE.RepeatWrapping;
+      n.repeat.set(1 / tileM, 1 / tileM);
+      m.normalMap = n;
+    }
+    return m;
+  }, [mat?.id, mat?.color, mat?.albedo, mat?.normal, mat?.roughness, mat?.metalness, tileM]);
+  useEffect(() => () => { material.map?.dispose(); material.normalMap?.dispose(); material.dispose(); }, [material]);
+
+  // Shape en XY → al piso (XZ) con rotación +90° en X; el espesor baja desde la cota y.
+  return <mesh geometry={geom} material={material} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]} receiveShadow castShadow />;
+}
+
+/** Superficie de suelo: losa fina (rectángulo o círculo/elipse) sobre el suelo del nivel. */
+function Surface3D({
+  s,
+  mat,
+  selected,
+  yOffset = 0,
+}: {
+  s: Surface;
+  mat?: Material;
+  selected: boolean;
+  yOffset?: number;
+}) {
+  const lift = s.lift ?? 0.01;
+  const th = s.thickness ?? 0.04;
+  const a = (s.rotDeg * Math.PI) / 180;
+  const tileM = mat?.tileM ?? 1;
+  const repX = Math.max(1, Math.min(80, Math.round(s.width / tileM)));
+  const repZ = Math.max(1, Math.min(80, Math.round(s.depth / tileM)));
+  const material = usePbrMaterial(mat, s.color ?? "#7d7468", repX, repZ, selected);
   return (
-    <mesh position={[(minX + maxX) / 2, y - th / 2, (minZ + maxZ) / 2]} material={material} receiveShadow castShadow>
-      <boxGeometry args={[w, th, d]} />
-    </mesh>
+    <group position={[s.pos.x, yOffset + lift, s.pos.z]} rotation={[0, -a, 0]}>
+      {s.shape === "circle" ? (
+        <mesh position={[0, -th / 2, 0]} scale={[s.width, 1, s.depth]} material={material} receiveShadow castShadow>
+          <cylinderGeometry args={[0.5, 0.5, th, 48]} />
+        </mesh>
+      ) : (
+        <mesh position={[0, -th / 2, 0]} material={material} receiveShadow castShadow>
+          <boxGeometry args={[s.width, th, s.depth]} />
+        </mesh>
+      )}
+    </group>
   );
 }
 
@@ -337,7 +508,30 @@ function buildRoofGable(b: Bounds3, baseY: number, rise: number, axis: "x" | "z"
   return g;
 }
 
-/** Techo de un nivel: losa plana o a dos aguas, sobre la huella de los muros. */
+/** Techo de una sola caída (mono-pendiente): plano inclinado del lado bajo al alto. */
+function buildRoofShed(b: Bounds3, baseY: number, rise: number, axis: "x" | "z"): THREE.BufferGeometry {
+  const hiY = baseY + rise;
+  let v: number[];
+  if (axis === "x") {
+    // borde alto corre a lo largo de X; pendiente en Z (bajo en -Z, alto en +Z)
+    v = [
+      b.minX, baseY, b.minZ, b.maxX, baseY, b.minZ, b.maxX, hiY, b.maxZ,
+      b.minX, baseY, b.minZ, b.maxX, hiY, b.maxZ, b.minX, hiY, b.maxZ,
+    ];
+  } else {
+    // borde alto corre a lo largo de Z; pendiente en X (bajo en -X, alto en +X)
+    v = [
+      b.minX, baseY, b.minZ, b.maxX, hiY, b.minZ, b.maxX, hiY, b.maxZ,
+      b.minX, baseY, b.minZ, b.maxX, hiY, b.maxZ, b.minX, baseY, b.maxZ,
+    ];
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Techo de un nivel: losa plana, a dos aguas o de una caída, sobre la huella de los muros. */
 function Roof3D({ roof, bounds, elevation, mat }: { roof: Roof; bounds: Bounds3; elevation: number; mat?: Material }) {
   const w = Math.max(bounds.maxX - bounds.minX, 0.2);
   const d = Math.max(bounds.maxZ - bounds.minZ, 0.2);
@@ -346,10 +540,12 @@ function Roof3D({ roof, bounds, elevation, mat }: { roof: Roof; bounds: Bounds3;
   const repZ = Math.max(1, Math.min(60, Math.round(d / tileM)));
   const flatMat = usePbrMaterial(mat, "#7c8088", repX, repZ, false);
   const baseY = elevation + roof.height;
-  const gable = useMemo(
-    () => (roof.kind === "gable" ? buildRoofGable(bounds, baseY, roof.rise, roof.ridgeAxis ?? (w >= d ? "x" : "z")) : null),
-    [roof.kind, roof.rise, roof.ridgeAxis, bounds, baseY, w, d],
-  );
+  const gable = useMemo(() => {
+    const axis = roof.ridgeAxis ?? (w >= d ? "x" : "z");
+    if (roof.kind === "gable") return buildRoofGable(bounds, baseY, roof.rise, axis);
+    if (roof.kind === "shed") return buildRoofShed(bounds, baseY, roof.rise, axis);
+    return null;
+  }, [roof.kind, roof.rise, roof.ridgeAxis, bounds, baseY, w, d]);
   useEffect(() => () => gable?.dispose(), [gable]);
 
   if (roof.kind === "flat") {
@@ -402,10 +598,75 @@ function Fit3D() {
   return null;
 }
 
-function Scene() {
+/** Guarda/restaura la cámara (posición + target) en localStorage. Para el visor en pestaña aparte. */
+function CameraPersist({ storageKey }: { storageKey: string }) {
+  const camera = useThree((s) => s.camera);
+  const controls = useThree((s) => s.controls) as unknown as
+    | { target: THREE.Vector3; update: () => void; addEventListener: (t: string, f: () => void) => void; removeEventListener: (t: string, f: () => void) => void }
+    | undefined;
+  const restored = useRef(false);
+  useEffect(() => {
+    if (!controls) return;
+    if (!restored.current) {
+      restored.current = true;
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          const v = JSON.parse(raw);
+          camera.position.set(v.px, v.py, v.pz);
+          controls.target.set(v.tx, v.ty, v.tz);
+          controls.update();
+        }
+      } catch {
+        /* sin cámara guardada */
+      }
+    }
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const save = () => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => {
+        try {
+          const tg = controls.target;
+          localStorage.setItem(
+            storageKey,
+            JSON.stringify({ px: camera.position.x, py: camera.position.y, pz: camera.position.z, tx: tg.x, ty: tg.y, tz: tg.z }),
+          );
+        } catch {
+          /* localStorage lleno: ignorar */
+        }
+      }, 400);
+    };
+    controls.addEventListener("change", save);
+    return () => {
+      if (t) clearTimeout(t);
+      controls.removeEventListener("change", save);
+    };
+  }, [controls, camera, storageKey]);
+  return null;
+}
+
+/** Altura local (m) del punto luminoso de una luminaria, o null si el mueble no es una luz. */
+function lampEmitterY(f: Furniture): number | null {
+  const H = f.height;
+  switch (f.kind) {
+    case "streetlamp": return H + 0.13;
+    case "bollard-light": return H * 0.96;
+    case "table-lamp": return H * 0.82;
+    case "floor-lamp": return H * 0.9;
+    case "pendant-lamp": return H * 0.16;
+    case "wall-lamp": return H * 0.5;
+    case "campfire": return H * 0.6;
+    default: return null;
+  }
+}
+const MAX_LAMP_LIGHTS = 24; // tope para no pasarnos de luces (perf WebGL)
+const MAX_LAMP_SHADOWS = 3; // cuántas luminarias proyectan sombra (los cube shadow maps son caros)
+
+function Scene({ persistCameraKey }: { persistCameraKey?: string }) {
   const walls = useEditor((s) => s.walls);
   const furniture = useEditor((s) => s.furniture);
   const openings = useEditor((s) => s.openings);
+  const surfaces = useEditor((s) => s.surfaces);
   const materials = useEditor((s) => s.materials);
   const floorMaterialId = useEditor((s) => s.floorMaterialId);
   const floors = useEditor((s) => s.floors);
@@ -426,22 +687,31 @@ function Scene() {
   const elevOf = (lvl?: number) => floors[lvl ?? 0]?.elevation ?? 0;
   const sel = new Set(selectedRefs(selection, multi).map((r) => `${r.kind}:${r.id}`));
 
-  // Una losa de piso por nivel, dimensionada a la huella (muros + muebles) de ese nivel.
-  const PAD = 0.15;
-  const slabs = floors
-    .map((fl, lvl) => {
-      let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity, has = false;
-      const add = (x: number, z: number) => {
-        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-        minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
-        has = true;
-      };
-      for (const w of walls) if ((w.level ?? 0) === lvl) { add(w.a.x, w.a.z); add(w.b.x, w.b.z); }
-      for (const f of furniture) if ((f.level ?? 0) === lvl) for (const p of footprintCorners(f)) add(p.x, p.z);
-      if (!has) return null;
-      return { lvl, minX: minX - PAD, maxX: maxX + PAD, minZ: minZ - PAD, maxZ: maxZ + PAD, y: fl.elevation };
-    })
-    .filter((s): s is { lvl: number; minX: number; maxX: number; minZ: number; maxZ: number; y: number } => s !== null);
+  // Luces reales de las luminarias (point lights cálidos), con tope de cantidad.
+  // Las primeras MAX_LAMP_SHADOWS proyectan sombra (solo si las sombras están activas).
+  const lampInt = render.lampIntensity ?? 8;
+  const lamps =
+    render.lampLights === false
+      ? []
+      : furniture
+          .map((f) => {
+            const y = lampEmitterY(f);
+            return y == null ? null : { id: f.id, pos: [f.pos.x, elevOf(f.level) + f.baseHeight + y, f.pos.z] as [number, number, number] };
+          })
+          .filter((x): x is { id: string; pos: [number, number, number] } => x !== null)
+          .slice(0, MAX_LAMP_LIGHTS)
+          .map((l, i) => ({ ...l, shadow: render.shadows !== false && i < MAX_LAMP_SHADOWS }));
+
+  // Piso por AMBIENTE: el suelo se genera sólo donde los muros encierran un recinto.
+  // Así una medianera/perímetro abierto, un seto o muros sueltos NO generan piso (no
+  // tapan el terreno). Sólo cuentan las paredes reales del edificio (no cercos/setos).
+  const roomFloors = floors.flatMap((fl, lvl) => {
+    if (fl.autoSlab === false) return [];
+    const segs = walls
+      .filter((w) => (w.level ?? 0) === lvl && !["hedge", "fence", "railing", "picket"].includes(w.kind ?? "solid"))
+      .map((w) => ({ a: w.a, b: w.b }));
+    return roomPolygons(segs).map((poly, i) => ({ key: `${lvl}-${i}`, poly, y: fl.elevation, lvl }));
+  });
 
   // Techos: cubren la huella de los MUROS del nivel (+ alero/overhang).
   const roofsR = roofs
@@ -475,11 +745,23 @@ function Scene() {
         shadow-camera-bottom={-20}
         shadow-camera-near={0.5}
         shadow-camera-far={60}
+        shadow-radius={4}
+        shadow-bias={-0.0004}
       />
 
       <Floor mat={getMat(floorMaterialId)} />
-      {slabs.map((s) => (
-        <FloorSlab key={s.lvl} minX={s.minX} maxX={s.maxX} minZ={s.minZ} maxZ={s.maxZ} y={s.y} mat={getMat(floors[s.lvl]?.materialId ?? floorMaterialId)} />
+      <Terrain3D />
+      {roomFloors.map((s) => (
+        <RoomFloor key={s.key} poly={s.poly} y={s.y} mat={getMat(floors[s.lvl]?.materialId ?? floorMaterialId)} />
+      ))}
+      {surfaces.map((s) => (
+        <Surface3D
+          key={s.id}
+          s={s}
+          mat={getMat(s.materialId)}
+          selected={sel.has(`surface:${s.id}`)}
+          yOffset={elevOf(s.level)}
+        />
       ))}
       {roofsR.map((r) => (
         <Roof3D key={r.roof.id} roof={r.roof} bounds={r.bounds} elevation={r.elevation} mat={getMat(r.roof.materialId)} />
@@ -519,8 +801,22 @@ function Scene() {
           yOffset={elevOf(f.level)}
         />
       ))}
+      {lamps.map((l) => (
+        <pointLight
+          key={l.id}
+          position={l.pos}
+          color="#ffdca8"
+          intensity={lampInt}
+          distance={9}
+          decay={2}
+          castShadow={l.shadow}
+          shadow-mapSize={[512, 512]}
+          shadow-bias={-0.002}
+        />
+      ))}
 
       <Fit3D />
+      {persistCameraKey && <CameraPersist storageKey={persistCameraKey} />}
 
       <OrbitControls
         makeDefault
@@ -537,9 +833,19 @@ function Scene() {
 export default function Scene3D({
   big = false,
   onToggleBig,
+  floating = false,
+  onToggleFloat,
+  onOpenTab,
+  chrome = true,
+  persistCameraKey,
 }: {
   big?: boolean;
   onToggleBig?: () => void;
+  floating?: boolean;
+  onToggleFloat?: () => void;
+  onOpenTab?: () => void;
+  chrome?: boolean;
+  persistCameraKey?: string;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -571,15 +877,15 @@ export default function Scene3D({
     return () => window.removeEventListener("renderre:exportpng", onExport);
   }, []);
 
-  // Escape para salir del modo agrandado.
+  // Escape para salir del modo agrandado o flotante.
   useEffect(() => {
-    if (!big) return;
+    if (!big && !floating) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !document.fullscreenElement) onToggleBig?.();
+      if (e.key === "Escape" && !document.fullscreenElement) (big ? onToggleBig : onToggleFloat)?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [big, onToggleBig]);
+  }, [big, floating, onToggleBig, onToggleFloat]);
 
   const btn =
     "grid h-7 w-7 place-items-center rounded-md bg-neutral-800/90 text-neutral-100 hover:bg-neutral-700";
@@ -587,20 +893,40 @@ export default function Scene3D({
   return (
     <div ref={wrapRef} className="relative h-full w-full bg-[#0b0e14]">
       <Canvas
-        shadows
+        shadows="soft"
         dpr={[1, 2]}
         gl={{ preserveDrawingBuffer: true }}
         camera={{ position: [9, 9, 12], fov: 50, near: 0.1, far: 500 }}
       >
-        <Scene />
+        <Scene persistCameraKey={persistCameraKey} />
       </Canvas>
+      {chrome && (
       <div className="pointer-events-none absolute left-2 top-2 rounded bg-black/40 px-2 py-1 text-[11px] text-neutral-400">
         Vista 3D · arrastrá para orbitar · rueda para zoom{big ? " · Esc para volver" : ""}
       </div>
+      )}
+      {chrome && (
       <div className="absolute right-2 top-2 flex items-center gap-1">
-        <button type="button" onClick={onToggleBig} title={big ? "Restaurar" : "Agrandar"} className={btn}>
-          {big ? <ShrinkIcon width={16} height={16} /> : <ExpandIcon width={16} height={16} />}
-        </button>
+        {onOpenTab && (
+          <button type="button" onClick={onOpenTab} title="Abrir la vista 3D en otra pestaña" className={btn}>
+            ⧉↗
+          </button>
+        )}
+        {onToggleFloat && (
+          <button
+            type="button"
+            onClick={onToggleFloat}
+            title={floating ? "Anclar la vista 3D" : "Abrir en ventana flotante"}
+            className={btn}
+          >
+            {floating ? "⤓" : "⧉"}
+          </button>
+        )}
+        {onToggleBig && (
+          <button type="button" onClick={onToggleBig} title={big ? "Restaurar" : "Agrandar"} className={btn}>
+            {big ? <ShrinkIcon width={16} height={16} /> : <ExpandIcon width={16} height={16} />}
+          </button>
+        )}
         <button type="button" onClick={toggleFullscreen} title="Pantalla completa" className={btn}>
           <FullscreenIcon width={16} height={16} />
         </button>
@@ -613,6 +939,7 @@ export default function Scene3D({
           ⬇ PNG
         </button>
       </div>
+      )}
     </div>
   );
 }

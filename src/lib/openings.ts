@@ -81,9 +81,11 @@ export function wallPieces(wall: Wall, openings: Opening[]): WallPiece[] {
     const s = o.c - o.width / 2;
     const e = o.c + o.width / 2;
     if (s - cursor > 1e-3) pieces.push(seg(cursor, s, 0, H));
-    const sillTop = o.kind === "window" ? Math.min(o.sill, H) : 0;
-    const headBottom = o.kind === "window" ? Math.min(o.sill + o.height, H) : Math.min(o.height, H);
-    if (sillTop > 1e-3) pieces.push(seg(s, e, 0, sillTop)); // antepecho (ventana)
+    // El antepecho (sill) ahora vale para ambos: ventana (alféizar) y puerta elevada
+    // (p. ej. una entrada a la altura de la planta alta sobre un muro alto).
+    const sillTop = Math.min(Math.max(0, o.sill), H);
+    const headBottom = Math.min(o.sill + o.height, H);
+    if (sillTop > 1e-3) pieces.push(seg(s, e, 0, sillTop)); // antepecho (ventana / puerta elevada)
     if (H - headBottom > 1e-3) pieces.push(seg(s, e, headBottom, H)); // dintel
     cursor = Math.max(cursor, e);
   }

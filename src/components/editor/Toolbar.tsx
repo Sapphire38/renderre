@@ -13,6 +13,7 @@ import {
   FitIcon,
   CabinetIcon,
   DoorIcon,
+  SurfaceIcon,
 } from "./icons";
 
 function TBtn({
@@ -79,6 +80,9 @@ export default function Toolbar() {
       </TBtn>
       <TBtn active={tool === "opening"} title="Puerta / ventana (O)" onClick={() => setTool("opening")}>
         <DoorIcon />
+      </TBtn>
+      <TBtn active={tool === "surface"} title="Suelo / superficie de jardín (S)" onClick={() => setTool("surface")}>
+        <SurfaceIcon />
       </TBtn>
       <TBtn active={tool === "pan"} title="Mover vista (H / Espacio)" onClick={() => setTool("pan")}>
         <HandIcon />

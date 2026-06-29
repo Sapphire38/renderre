@@ -17,17 +17,22 @@ import {
 } from "@/lib/geometry";
 import {
   footprintCorners,
+  isWallMounted,
   localToWorld,
   pickFurniture,
   presetFor,
 } from "@/lib/furniture";
 import { offsetOnWall, openingFrame, pickOpening } from "@/lib/openings";
+import { surfaceCorners, pickSurface } from "@/lib/surfaces";
+import { wallKindMeta } from "@/lib/walls";
 import type {
   Furniture,
   GridSettings,
+  Material,
   Opening,
   SelRef,
   Selection,
+  Surface,
   ToolId,
   Vec2,
   Wall,
@@ -47,6 +52,9 @@ type Gesture =
   | { type: "resize-furniture"; id: string; committed: boolean; anchor: Vec2; ang: number }
   | { type: "rotate-furniture"; id: string; committed: boolean }
   | { type: "move-opening"; id: string; committed: boolean }
+  | { type: "move-surface"; id: string; committed: boolean; startWorld: Vec2; orig: Vec2 }
+  | { type: "resize-surface"; id: string; committed: boolean; anchor: Vec2; ang: number }
+  | { type: "draw-surface"; startWorld: Vec2; startSx: number; startSy: number }
   | { type: "marquee"; startWorld: Vec2; startSx: number; startSy: number; additive: boolean }
   | {
       type: "move-group";
@@ -54,6 +62,7 @@ type Gesture =
       startWorld: Vec2;
       origW: Record<string, { a: Vec2; b: Vec2 }>;
       origF: Record<string, Vec2>;
+      origS: Record<string, Vec2>;
     };
 
 const selKey = (r: SelRef) => `${r.kind}:${r.id}`;
@@ -79,6 +88,8 @@ export default function PlanCanvas() {
     walls: Wall[];
     furniture: Furniture[];
     openings: Opening[];
+    surfaces: Surface[];
+    materials: Material[];
     grid: GridSettings;
     selection: Selection;
     multi: SelRef[];
@@ -89,6 +100,8 @@ export default function PlanCanvas() {
     walls: [],
     furniture: [],
     openings: [],
+    surfaces: [],
+    materials: [],
     grid: { cellM: 0.5, snap: true, showGrid: true },
     selection: null,
     multi: [],
@@ -100,13 +113,15 @@ export default function PlanCanvas() {
   const walls = useEditor((s) => s.walls);
   const furniture = useEditor((s) => s.furniture);
   const openings = useEditor((s) => s.openings);
+  const surfaces = useEditor((s) => s.surfaces);
+  const materials = useEditor((s) => s.materials);
   const grid = useEditor((s) => s.grid);
   const selection = useEditor((s) => s.selection);
   const multi = useEditor((s) => s.multi);
   const tool = useEditor((s) => s.tool);
   const furnitureKind = useEditor((s) => s.furnitureKind);
   const activeLevel = useEditor((s) => s.activeLevel);
-  propsRef.current = { walls, furniture, openings, grid, selection, multi, tool, furnitureKind, activeLevel };
+  propsRef.current = { walls, furniture, openings, surfaces, materials, grid, selection, multi, tool, furnitureKind, activeLevel };
 
   const scale = () => PX_PER_M * viewRef.current.zoom;
   const worldToScreen = (p: Vec2) => {
@@ -156,15 +171,22 @@ export default function PlanCanvas() {
 
     const v = viewRef.current;
     const s = PX_PER_M * v.zoom;
-    const { walls: allW, furniture: allF, openings: allO, grid, selection, multi, tool, furnitureKind, activeLevel } =
+    const { walls: allW, furniture: allF, openings: allO, surfaces: allS, materials, grid, selection, multi, tool, furnitureKind, activeLevel } =
       propsRef.current;
     const walls = allW.filter((wl) => (wl.level ?? 0) === activeLevel);
     const furniture = allF.filter((f) => (f.level ?? 0) === activeLevel);
     const openings = allO.filter((o) => (o.level ?? 0) === activeLevel);
+    const surfaces = allS.filter((x) => (x.level ?? 0) === activeLevel);
     const sel = new Set(selectedRefs(selection, multi).map(selKey));
+    const matColor = (id?: string) => (id ? materials.find((m) => m.id === id)?.color : undefined);
 
     if (grid.showGrid) drawGrid(ctx, w, h, v, s, grid.cellM);
     drawAxes(ctx, v, w, h);
+
+    // Superficies de suelo (debajo de muros/muebles).
+    for (const sf of surfaces) {
+      drawSurface(ctx, sf, v, s, sel.has(`surface:${sf.id}`), matColor(sf.materialId));
+    }
 
     for (const wl of walls) {
       drawWall(ctx, wl, v, s, sel.has(`wall:${wl.id}`));
@@ -221,6 +243,11 @@ export default function PlanCanvas() {
       drawMarquee(ctx, a.x, a.y, cur.x, cur.y);
     }
 
+    if (g && g.type === "draw-surface" && cur) {
+      const a = worldToScreen(g.startWorld);
+      drawSurfaceRect(ctx, a.x, a.y, cur.x, cur.y);
+    }
+
     drawHud(ctx, w, h, v, s, tool, walls, furniture, cursorScreenRef.current, sel.size);
   }, []);
 
@@ -235,7 +262,7 @@ export default function PlanCanvas() {
   useEffect(() => {
     if (tool !== "wall") draftStartRef.current = null;
     schedule();
-  }, [walls, furniture, openings, grid, selection, multi, tool, furnitureKind, activeLevel, schedule]);
+  }, [walls, furniture, openings, surfaces, materials, grid, selection, multi, tool, furnitureKind, activeLevel, schedule]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -385,6 +412,7 @@ export default function PlanCanvas() {
       else if (e.key === "w" || e.key === "W") st.setTool("wall");
       else if (e.key === "f" || e.key === "F") st.setTool("furniture");
       else if (e.key === "o" || e.key === "O") st.setTool("opening");
+      else if (e.key === "s" || e.key === "S") st.setTool("surface");
       else if (e.key === "h" || e.key === "H") st.setTool("pan");
       else if (e.key === "g" || e.key === "G") st.setGrid({ showGrid: !st.grid.showGrid });
       else if (e.key === "m" || e.key === "M") st.setGrid({ snap: !st.grid.snap });
@@ -460,6 +488,16 @@ export default function PlanCanvas() {
 
     if (st.tool === "furniture") {
       const snap = computeSnap(world);
+      // Objetos montables (cuadro/espejo/TV/aire/…): si hay un muro cerca, se pegan y orientan.
+      if (isWallMounted(st.furnitureKind as Furniture["kind"])) {
+        const w = pickWall(onLvl(st.walls), world, 0.8);
+        const m = w ? wallMountPlacement(w, world, presetFor(st.furnitureKind as Furniture["kind"]).depth) : null;
+        if (m) {
+          st.addFurniture(st.furnitureKind, m.pos, m.rotDeg);
+          schedule();
+          return;
+        }
+      }
       st.addFurniture(st.furnitureKind, snap.point);
       schedule();
       return;
@@ -468,6 +506,14 @@ export default function PlanCanvas() {
     if (st.tool === "opening") {
       const w = pickWall(onLvl(st.walls), world, Math.max(0.5, 16 / scale()));
       if (w) st.addOpening(w.id, st.openingKind, offsetOnWall(w, world));
+      schedule();
+      return;
+    }
+
+    if (st.tool === "surface") {
+      const snap = computeSnap(world);
+      gestureRef.current = { type: "draw-surface", startWorld: { ...snap.point }, startSx: sx, startSy: sy };
+      snapRef.current = snap;
       schedule();
       return;
     }
@@ -514,18 +560,39 @@ export default function PlanCanvas() {
           }
         }
       }
+      if (single && st.selection?.kind === "surface") {
+        const sf = st.surfaces.find((x) => x.id === st.selection!.id);
+        if (sf) {
+          const cn = surfaceCorners(sf);
+          for (let i = 0; i < 4; i++) {
+            if (Math.hypot(world.x - cn[i].x, world.z - cn[i].z) < Math.max(10 / scale(), 0.08)) {
+              gestureRef.current = {
+                type: "resize-surface",
+                id: sf.id,
+                committed: false,
+                anchor: { ...cn[(i + 2) % 4] },
+                ang: (sf.rotDeg * Math.PI) / 180,
+              };
+              return;
+            }
+          }
+        }
+      }
 
-      // ¿qué hay bajo el cursor? muebles primero (encima), luego aberturas, luego muros
+      // ¿qué hay bajo el cursor? muebles primero (encima), luego aberturas, muros y por último superficies (suelo)
       const pf = pickFurniture(onLvl(st.furniture), world);
       const po = pf ? null : pickOpening(onLvl(st.openings), (id) => st.walls.find((x) => x.id === id), world, Math.max(tol, 12 / scale()));
       const pw = pf || po ? null : pickWall(onLvl(st.walls), world, tol);
+      const ps = pf || po || pw ? null : pickSurface(onLvl(st.surfaces), world);
       const hit: SelRef | null = pf
         ? { kind: "furniture", id: pf.id }
         : po
           ? { kind: "opening", id: po.id }
           : pw
             ? { kind: "wall", id: pw.id }
-            : null;
+            : ps
+              ? { kind: "surface", id: ps.id }
+              : null;
 
       // Shift+clic: alternar pertenencia al conjunto (sin arrastrar)
       if (e.shiftKey) {
@@ -542,6 +609,7 @@ export default function PlanCanvas() {
       if (hit && inSel && refs.length > 1) {
         const origW: Record<string, { a: Vec2; b: Vec2 }> = {};
         const origF: Record<string, Vec2> = {};
+        const origS: Record<string, Vec2> = {};
         for (const r of refs) {
           if (r.kind === "wall") {
             const w = st.walls.find((x) => x.id === r.id);
@@ -549,9 +617,12 @@ export default function PlanCanvas() {
           } else if (r.kind === "furniture") {
             const f = st.furniture.find((x) => x.id === r.id);
             if (f) origF[f.id] = { ...f.pos };
+          } else if (r.kind === "surface") {
+            const sf = st.surfaces.find((x) => x.id === r.id);
+            if (sf) origS[sf.id] = { ...sf.pos };
           }
         }
-        gestureRef.current = { type: "move-group", committed: false, startWorld: world, origW, origF };
+        gestureRef.current = { type: "move-group", committed: false, startWorld: world, origW, origF, origS };
         return;
       }
 
@@ -576,6 +647,12 @@ export default function PlanCanvas() {
           startWorld: world,
           orig: { a: { ...pw.a }, b: { ...pw.b } },
         };
+        schedule();
+        return;
+      }
+      if (ps) {
+        st.selectSurface(ps.id);
+        gestureRef.current = { type: "move-surface", id: ps.id, committed: false, startWorld: world, orig: { ...ps.pos } };
         schedule();
         return;
       }
@@ -649,6 +726,61 @@ export default function PlanCanvas() {
         st.furniture.map((f) => (f.id === g.id ? { ...f, pos: { x: g.orig.x + dx, z: g.orig.z + dz } } : f)),
       );
       schedule();
+      return;
+    }
+
+    if (g && g.type === "move-surface") {
+      if (!g.committed) {
+        st.pushHistory();
+        g.committed = true;
+      }
+      let dx = world.x - g.startWorld.x;
+      let dz = world.z - g.startWorld.z;
+      if (st.grid.snap) {
+        dx = Math.round(dx / st.grid.cellM) * st.grid.cellM;
+        dz = Math.round(dz / st.grid.cellM) * st.grid.cellM;
+      }
+      st.setSurfaces(
+        st.surfaces.map((x) => (x.id === g.id ? { ...x, pos: { x: g.orig.x + dx, z: g.orig.z + dz } } : x)),
+      );
+      schedule();
+      return;
+    }
+
+    if (g && g.type === "resize-surface") {
+      if (!g.committed) {
+        st.pushHistory();
+        g.committed = true;
+      }
+      const c = Math.cos(-g.ang);
+      const sn = Math.sin(-g.ang);
+      const dxw = world.x - g.anchor.x;
+      const dzw = world.z - g.anchor.z;
+      let du = dxw * c - dzw * sn;
+      let dv = dxw * sn + dzw * c;
+      if (st.grid.snap) {
+        du = Math.sign(du) * Math.max(st.grid.cellM, Math.round(Math.abs(du) / st.grid.cellM) * st.grid.cellM);
+        dv = Math.sign(dv) * Math.max(st.grid.cellM, Math.round(Math.abs(dv) / st.grid.cellM) * st.grid.cellM);
+      }
+      const w = Math.max(0.05, Math.abs(du));
+      const d = Math.max(0.05, Math.abs(dv));
+      const su = du < 0 ? -1 : 1;
+      const sv = dv < 0 ? -1 : 1;
+      const ca = Math.cos(g.ang);
+      const sa = Math.sin(g.ang);
+      const halfU = (su * w) / 2;
+      const halfV = (sv * d) / 2;
+      const cx = g.anchor.x + halfU * ca - halfV * sa;
+      const cz = g.anchor.z + halfU * sa + halfV * ca;
+      st.setSurfaces(
+        st.surfaces.map((x) => (x.id === g.id ? { ...x, width: w, depth: d, pos: { x: cx, z: cz } } : x)),
+      );
+      schedule();
+      return;
+    }
+
+    if (g && g.type === "draw-surface") {
+      schedule(); // sólo redibuja el rectángulo de arrastre
       return;
     }
 
@@ -741,6 +873,12 @@ export default function PlanCanvas() {
           return o ? { ...f, pos: { x: o.x + dx, z: o.z + dz } } : f;
         }),
       );
+      st.setSurfaces(
+        st.surfaces.map((x) => {
+          const o = g.origS[x.id];
+          return o ? { ...x, pos: { x: o.x + dx, z: o.z + dz } } : x;
+        }),
+      );
       schedule();
       return;
     }
@@ -770,6 +908,30 @@ export default function PlanCanvas() {
       /* ignore */
     }
     const g = gestureRef.current;
+    if (g && g.type === "draw-surface") {
+      const { sx, sy } = getPointer(e);
+      const st = useEditor.getState();
+      const movedPx = Math.hypot(sx - g.startSx, sy - g.startSy);
+      if (movedPx < 6) {
+        // clic simple -> superficie de tamaño por defecto centrada en el punto
+        st.addSurface({ ...g.startWorld });
+      } else {
+        const endSnap = computeSnap(screenToWorld(sx, sy));
+        const minX = Math.min(g.startWorld.x, endSnap.point.x);
+        const maxX = Math.max(g.startWorld.x, endSnap.point.x);
+        const minZ = Math.min(g.startWorld.z, endSnap.point.z);
+        const maxZ = Math.max(g.startWorld.z, endSnap.point.z);
+        const width = maxX - minX;
+        const depth = maxZ - minZ;
+        if (width > 0.05 && depth > 0.05) {
+          st.addSurface({ x: (minX + maxX) / 2, z: (minZ + maxZ) / 2 }, { width, depth });
+        }
+      }
+      gestureRef.current = null;
+      snapRef.current = null;
+      schedule();
+      return;
+    }
     if (g && g.type === "marquee") {
       const { sx, sy } = getPointer(e);
       const st = useEditor.getState();
@@ -800,6 +962,10 @@ export default function PlanCanvas() {
           const wall = st.walls.find((x) => x.id === o.wallId);
           if (wall && pointInRect(openingFrame(wall, o).center, r)) found.push({ kind: "opening", id: o.id });
         }
+        for (const x of st.surfaces) {
+          if ((x.level ?? 0) !== lvl) continue;
+          if (rectIntersectsAabb(r, aabbOf(surfaceCorners(x)))) found.push({ kind: "surface", id: x.id });
+        }
         if (g.additive) {
           const prev = selectedRefs(st.selection, st.multi);
           const merged = [...prev];
@@ -825,7 +991,7 @@ export default function PlanCanvas() {
   };
 
   const cursor =
-    tool === "wall" || tool === "furniture" || tool === "opening"
+    tool === "wall" || tool === "furniture" || tool === "opening" || tool === "surface"
       ? "crosshair"
       : tool === "pan"
         ? "grab"
@@ -931,6 +1097,89 @@ function drawMarquee(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: 
   ctx.lineWidth = 1;
   ctx.strokeRect(x, y, w, h);
   ctx.restore();
+}
+
+/** Convierte un color hex (#rrggbb) a rgba con alfa; si no es hex lo devuelve tal cual. */
+function hexA(hex: string, a: number): string {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex);
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+function drawSurface(
+  ctx: CanvasRenderingContext2D,
+  sf: Surface,
+  v: View,
+  s: number,
+  selected: boolean,
+  matColor?: string,
+) {
+  const col = matColor ?? sf.color ?? "#7d7468";
+  const corners = surfaceCorners(sf).map((p) => ({ x: v.panX + p.x * s, y: v.panY + p.z * s }));
+  const cx = v.panX + sf.pos.x * s;
+  const cy = v.panY + sf.pos.z * s;
+  ctx.save();
+  ctx.beginPath();
+  if (sf.shape === "circle") {
+    ctx.ellipse(cx, cy, (sf.width / 2) * s, (sf.depth / 2) * s, (sf.rotDeg * Math.PI) / 180, 0, Math.PI * 2);
+  } else {
+    ctx.moveTo(corners[0].x, corners[0].y);
+    for (let i = 1; i < 4; i++) ctx.lineTo(corners[i].x, corners[i].y);
+    ctx.closePath();
+  }
+  ctx.fillStyle = hexA(col, selected ? 0.5 : 0.38);
+  ctx.fill();
+  ctx.setLineDash(selected ? [] : [6, 4]);
+  ctx.lineWidth = selected ? 2 : 1.2;
+  ctx.strokeStyle = selected ? "#38bdf8" : hexA(col, 0.95);
+  ctx.stroke();
+  ctx.restore();
+  label(ctx, sf.name || "Suelo", cx, cy, selected);
+  if (selected) {
+    for (const p of corners) {
+      ctx.fillStyle = "#0b0e14";
+      ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+      ctx.strokeStyle = "#38bdf8";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(p.x - 4, p.y - 4, 8, 8);
+    }
+  }
+}
+
+/** Rectángulo de arrastre al crear una superficie. */
+function drawSurfaceRect(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
+  const x = Math.min(x0, x1);
+  const y = Math.min(y0, y1);
+  const w = Math.abs(x1 - x0);
+  const h = Math.abs(y1 - y0);
+  ctx.save();
+  ctx.fillStyle = "rgba(110,231,183,0.18)";
+  ctx.fillRect(x, y, w, h);
+  ctx.setLineDash([5, 4]);
+  ctx.strokeStyle = "rgba(52,211,153,0.95)";
+  ctx.lineWidth = 1.4;
+  ctx.strokeRect(x, y, w, h);
+  ctx.restore();
+}
+
+/** Posición + rotación para "pegar" un objeto montable contra un muro, orientado hacia el lado del cursor. */
+function wallMountPlacement(wall: Wall, cursor: Vec2, depth: number): { pos: Vec2; rotDeg: number } {
+  const dx = wall.b.x - wall.a.x;
+  const dz = wall.b.z - wall.a.z;
+  const len = Math.hypot(dx, dz) || 1;
+  const ux = dx / len, uz = dz / len; // dirección del muro
+  let px = -uz, pz = ux; // perpendicular
+  let t = (cursor.x - wall.a.x) * ux + (cursor.z - wall.a.z) * uz;
+  t = Math.max(0, Math.min(len, t));
+  const projX = wall.a.x + ux * t;
+  const projZ = wall.a.z + uz * t;
+  const side = (cursor.x - projX) * px + (cursor.z - projZ) * pz; // lado del cursor
+  if (side < 0) { px = -px; pz = -pz; }
+  const off = (wall.thickness ?? 0.1) / 2 + depth / 2;
+  const pos = { x: projX + px * off, z: projZ + pz * off };
+  const rotDeg = (Math.atan2(px, -pz) * 180) / Math.PI; // frente local (-z) hacia la sala
+  return { pos, rotDeg };
 }
 
 function wallAabb(w: Wall): B {
@@ -1123,9 +1372,52 @@ function drawAxes(ctx: CanvasRenderingContext2D, v: View, w: number, h: number) 
 function drawWall(ctx: CanvasRenderingContext2D, wl: Wall, v: View, s: number, selected: boolean) {
   const A = { x: v.panX + wl.a.x * s, y: v.panY + wl.a.z * s };
   const B = { x: v.panX + wl.b.x * s, y: v.panY + wl.b.z * s };
+  const meta = wallKindMeta(wl.kind);
+  const planCol = selected ? "rgba(56,189,248,0.95)" : meta.plan;
+
+  // Cerco calado (alambrado/reja/cerco de madera): línea fina + postes (ticks).
+  if (!meta.solid) {
+    const dx = B.x - A.x;
+    const dy = B.y - A.y;
+    const lenPx = Math.hypot(dx, dy) || 1;
+    const px = -dy / lenPx;
+    const py = dx / lenPx;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = planCol;
+    ctx.lineWidth = selected ? 2.4 : 1.8;
+    ctx.setLineDash(wl.kind === "fence" ? [3, 3] : []);
+    ctx.beginPath();
+    ctx.moveTo(A.x, A.y);
+    ctx.lineTo(B.x, B.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const gapM = wl.kind === "fence" ? 2.5 : wl.kind === "picket" ? 0.5 : 1.0;
+    let count = Math.max(2, Math.round(wallLength(wl) / gapM));
+    count = Math.min(count, 120);
+    const tick = 4.5;
+    ctx.lineWidth = selected ? 2 : 1.4;
+    for (let i = 0; i <= count; i++) {
+      const t = i / count;
+      const x = A.x + dx * t;
+      const y = A.y + dy * t;
+      ctx.beginPath();
+      ctx.moveTo(x - px * tick, y - py * tick);
+      ctx.lineTo(x + px * tick, y + py * tick);
+      ctx.stroke();
+    }
+    for (const e of [A, B]) {
+      ctx.fillStyle = selected ? "#38bdf8" : "#8b94a3";
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, 2.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    label(ctx, `${meta.label} · ${formatLen(wallLength(wl))}`, (A.x + B.x) / 2, (A.y + B.y) / 2, selected);
+    return;
+  }
+
   const tpx = Math.max(wl.thickness * s, 2);
   ctx.lineCap = "round";
-  ctx.strokeStyle = selected ? "rgba(56,189,248,0.95)" : "rgba(206,213,224,0.92)";
+  ctx.strokeStyle = selected ? "rgba(56,189,248,0.95)" : meta.plan;
   ctx.lineWidth = tpx;
   ctx.beginPath();
   ctx.moveTo(A.x, A.y);
@@ -1420,9 +1712,11 @@ function drawHud(
         ? "Mueble: elegí del catálogo y hacé clic para colocar · luego seleccioná (V) para mover/rotar"
         : tool === "opening"
           ? "Abertura: elegí puerta/ventana y hacé clic sobre un muro · arrastrala para reubicarla"
-          : tool === "select"
-            ? "Seleccionar: clic o arrastrá un marco para varios · Shift+clic suma · arrastrá para mover · R rota · Supr borra"
-            : "Mano: arrastrá para mover la vista · rueda para zoom";
+          : tool === "surface"
+            ? "Suelo: arrastrá un rectángulo para crear una superficie (grabilla, césped, deck…) · clic = tamaño por defecto"
+            : tool === "select"
+              ? "Seleccionar: clic o arrastrá un marco para varios · Shift+clic suma · arrastrá para mover · R rota · Supr borra"
+              : "Mano: arrastrá para mover la vista · rueda para zoom";
   ctx.fillText(hint, 12, 10);
   if (selCount > 1) {
     ctx.fillStyle = "#7dd3fc";

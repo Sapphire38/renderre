@@ -61,8 +61,20 @@ const FURNITURE_KINDS = [
   "tv", "fridge", "stove", "sink", "washer", "toilet", "bed", "sofa", "tv-stand", "nightstand", "desk", "vanity",
   "water-heater", "bathtub", "shower", "chair", "plant", "round-table", "coffee-table", "stairs",
   "prim-box", "prim-cylinder", "prim-sphere", "prim-cone", "prim-pyramid", "prim-wedge",
+  "column", "column-sq",
+  "tree", "pine", "palm", "bush", "potted-plant", "flowers", "bench", "fountain", "bbq", "umbrella", "rock",
+  "streetlamp", "bollard-light", "table-lamp", "floor-lamp", "pendant-lamp", "wall-lamp",
+  "pool", "pergola", "gazebo", "swing", "slide", "hammock", "trampoline", "planter-box", "clothesline", "mailbox", "flag", "car",
+  "microwave", "range-hood", "dishwasher", "air-conditioner", "ceiling-fan", "water-tank", "bidet", "armchair", "dresser", "crib",
+  "rug", "mirror", "painting", "curtain", "wall-clock", "lounger", "bicycle", "dog-house",
+  "monitor", "office-chair", "bookcase", "whiteboard", "treadmill", "dumbbell-rack", "exercise-bike",
+  "pet-bed", "aquarium", "bird-cage", "coat-rack", "motorcycle", "pickup", "playset", "seesaw", "sandbox",
+  "kitchen-island", "corner-cabinet", "double-sink", "towel-rack", "medicine-cabinet", "wine-rack", "bar",
+  "tent", "kayak", "campfire", "cooler", "boat", "van", "truck", "scooter",
 ];
 const COMPONENT_KINDS = ["shelf", "drawer", "doorHinged", "doorSliding", "divider", "board", "rod"];
+const WALL_KINDS = ["solid", "brick", "stone", "block", "glass", "hedge", "fence", "railing", "picket"];
+const SURFACE_SHAPES = ["rect", "circle"];
 // props comunes de un componente del taller (cm/m en metros, x desde izq, y desde abajo)
 const COMPONENT_PROPS = {
   x: num, y: num, w: num, h: num,
@@ -146,9 +158,30 @@ const TOOLS = [
   {
     name: "renderre_add_wall",
     description:
-      "Agrega un muro entre dos puntos [x,z] (metros) en el piso activo. Opcional: base (arranque desde el piso), heightA/heightB (tope en cada extremo; si difieren queda inclinado, para techos a dos aguas).",
-    inputSchema: { type: "object", properties: { a: vec2, b: vec2, thickness: num, height: num, base: num, heightA: num, heightB: num }, required: ["a", "b"] },
+      `Agrega un muro/cerco entre dos puntos [x,z] (metros) en el piso activo. kind ∈ ${WALL_KINDS.join(", ")} (solid=liso; brick/stone/block/glass/hedge=macizos; fence=alambrado, railing=reja, picket=cerco de madera, calados). Opcional: base (arranque), heightA/heightB (tope inclinado a dos aguas), materialId, name.`,
+    inputSchema: { type: "object", properties: { a: vec2, b: vec2, kind: { enum: WALL_KINDS }, thickness: num, height: num, base: num, heightA: num, heightB: num, materialId: str, name: str }, required: ["a", "b"] },
     handler: (a) => runCommand("add_wall", a, "Agregar muro"),
+  },
+  {
+    name: "renderre_add_surface",
+    description:
+      "Agrega una superficie de suelo (grabilla, césped, deck, agua, etc.) centrada en (x,z) o pos [x,z]. width/depth en metros (si se omiten, 2×2). shape: rect|circle. Apoyá varias superficies para distintos suelos; lift (m) las apila/eleva. Asigná materialId (de get_state.materials) o color.",
+    inputSchema: {
+      type: "object",
+      properties: { pos: vec2, x: num, z: num, width: num, depth: num, shape: { enum: SURFACE_SHAPES }, rotDeg: num, thickness: num, lift: num, materialId: str, color: str, name: str },
+    },
+    handler: (a) => runCommand("add_surface", a, "Agregar suelo"),
+  },
+  {
+    name: "renderre_update_surface",
+    description:
+      "Edita una superficie de suelo por id (de get_state.surfaces): mover (x,z), redimensionar (width/depth), rotar (rotDeg), forma (shape), espesor (thickness), elevación (lift), material (materialId; null para quitar), color o nombre.",
+    inputSchema: {
+      type: "object",
+      properties: { id: str, x: num, z: num, width: num, depth: num, shape: { enum: SURFACE_SHAPES }, rotDeg: num, thickness: num, lift: num, materialId: str, color: str, name: str },
+      required: ["id"],
+    },
+    handler: (a) => runCommand("update_surface", a, "Editar suelo"),
   },
   {
     name: "renderre_add_furniture",
@@ -292,14 +325,14 @@ const TOOLS = [
   {
     name: "renderre_update_wall",
     description:
-      "Edita un muro existente por id: mover extremos a/b ([x,z]), espesor, alto, base (arranque), heightA/heightB (tope inclinado a dos aguas), nombre o material (materialId; null para quitarlo).",
-    inputSchema: { type: "object", properties: { id: str, a: vec2, b: vec2, thickness: num, height: num, base: num, heightA: num, heightB: num, name: str, materialId: str }, required: ["id"] },
+      `Edita un muro existente por id: tipo (kind ∈ ${WALL_KINDS.join(", ")}), mover extremos a/b ([x,z]), espesor, alto, base (arranque), heightA/heightB (tope inclinado a dos aguas), nombre o material (materialId; null para quitarlo).`,
+    inputSchema: { type: "object", properties: { id: str, kind: { enum: WALL_KINDS }, a: vec2, b: vec2, thickness: num, height: num, base: num, heightA: num, heightB: num, name: str, materialId: str }, required: ["id"] },
     handler: (a) => runCommand("update_wall", a, "Editar muro"),
   },
   {
     name: "renderre_delete",
-    description: "Borra un elemento por id. kind: furniture | wall | opening.",
-    inputSchema: { type: "object", properties: { kind: { enum: ["furniture", "wall", "opening"] }, id: str }, required: ["kind", "id"] },
+    description: "Borra un elemento por id. kind: furniture | wall | opening | surface.",
+    inputSchema: { type: "object", properties: { kind: { enum: ["furniture", "wall", "opening", "surface"] }, id: str }, required: ["kind", "id"] },
     handler: (a) => runCommand("delete", a, "Borrar"),
   },
   {
@@ -316,9 +349,21 @@ const TOOLS = [
   },
   {
     name: "renderre_set_render",
-    description: "Ajusta iluminación y fondo de la vista 3D. sunAzimuth (0..360°, dirección del sol en planta), sunElevation (1..90°, altura sobre el horizonte), sunIntensity (0..3), ambient (0..2, luz ambiente), background (color hex del cielo/fondo), shadows (true/false). Pasá solo los campos que quieras cambiar.",
-    inputSchema: { type: "object", properties: { sunAzimuth: num, sunElevation: num, sunIntensity: num, ambient: num, background: str, shadows: bool } },
+    description: "Ajusta iluminación y fondo de la vista 3D. sunAzimuth (0..360°, dirección del sol en planta), sunElevation (1..90°, altura sobre el horizonte), sunIntensity (0..3), ambient (0..2, luz ambiente), background (color hex del cielo/fondo), shadows (true/false), lampLights (true/false: las luminarias proyectan luz real), lampIntensity (0..40). Pasá solo los campos que quieras cambiar.",
+    inputSchema: { type: "object", properties: { sunAzimuth: num, sunElevation: num, sunIntensity: num, ambient: num, background: str, shadows: bool, lampLights: bool, lampIntensity: num } },
     handler: (a) => runCommand("set_render", a, "Ajustes de render"),
+  },
+  {
+    name: "renderre_set_terrain",
+    description: "Configura la malla de terreno esculpible (relieve del suelo). enabled (mostrar/ocultar en 3D), materialId (de get_state.materials), cols/rows/cell (tamaño de la grilla en celdas y metros — cambiarlo reinicia el relieve), reset (true = aplanar todo). El estado se lee en get_state.terrain.",
+    inputSchema: { type: "object", properties: { enabled: bool, materialId: str, cols: num, rows: num, cell: num, reset: bool } },
+    handler: (a) => runCommand("set_terrain", a, "Terreno"),
+  },
+  {
+    name: "renderre_sculpt_terrain",
+    description: "Esculpe el terreno con un pincel circular en el punto (x,z) en metros. radius (m), strength (m por aplicación), mode: raise (subir) | lower (bajar) | flatten (aplanar) | smooth (suavizar). Habilita el terreno automáticamente. Útil para hacer lomas, pozos o desniveles al recrear un terreno.",
+    inputSchema: { type: "object", properties: { x: num, z: num, radius: num, strength: num, mode: { enum: ["raise", "lower", "flatten", "smooth"] } }, required: ["x", "z"] },
+    handler: (a) => runCommand("sculpt_terrain", a, "Esculpir terreno"),
   },
   {
     name: "renderre_set_pricing",
@@ -331,6 +376,12 @@ const TOOLS = [
     description: "Coloca en el plano un mueble guardado de la biblioteca (por libId o por name, de get_state.customLibrary).",
     inputSchema: { type: "object", properties: { libId: str, name: str } },
     handler: (a) => runCommand("place_custom", a, "Colocar guardado"),
+  },
+  {
+    name: "renderre_place_model",
+    description: "Coloca un modelo 3D importado (.glb) de la biblioteca del proyecto, por id o name (de get_state.models). El usuario los importa desde el catálogo con 'Importar .glb'.",
+    inputSchema: { type: "object", properties: { id: str, name: str } },
+    handler: (a) => runCommand("place_model", a, "Colocar modelo"),
   },
 
   // ---- Taller de muebles a medida ----
@@ -430,8 +481,8 @@ const TOOLS = [
   // ---- techos ----
   {
     name: "renderre_set_roof",
-    description: "Pone (o cambia) el techo de un nivel. kind: flat (losa plana) | gable (a dos aguas). level omitido = activo. Cubre la huella de los muros del nivel.",
-    inputSchema: { type: "object", properties: { level: num, kind: { enum: ["flat", "gable"] } }, required: ["kind"] },
+    description: "Pone (o cambia) el techo de un nivel. kind: flat (losa plana) | gable (a dos aguas) | shed (una caída). level omitido = activo. Cubre la huella de los muros del nivel.",
+    inputSchema: { type: "object", properties: { level: num, kind: { enum: ["flat", "gable", "shed"] } }, required: ["kind"] },
     handler: (a) => runCommand("set_roof", a, "Poner techo"),
   },
   {
@@ -449,14 +500,14 @@ const TOOLS = [
   // ---- materiales ----
   {
     name: "renderre_add_material",
-    description: "Crea un material de color sólido (luego asignalo por id con update_furniture/update_wall/set_floor_material). tileM=metros por repetición, roughness/metalness 0..1.",
-    inputSchema: { type: "object", properties: { name: str, color: str, tileM: num, roughness: num, metalness: num }, required: ["name", "color"] },
+    description: "Crea un material de color sólido (luego asignalo por id con update_furniture/update_wall/set_floor_material). tileM=metros por repetición, roughness/metalness 0..1, opacity 0..1 (transparencia: agua/vidrio).",
+    inputSchema: { type: "object", properties: { name: str, color: str, tileM: num, roughness: num, metalness: num, opacity: num }, required: ["name", "color"] },
     handler: (a) => runCommand("add_material", a, "Crear material"),
   },
   {
     name: "renderre_update_material",
-    description: "Edita un material existente por id (nombre, color, tileM, roughness, metalness).",
-    inputSchema: { type: "object", properties: { id: str, name: str, color: str, tileM: num, roughness: num, metalness: num }, required: ["id"] },
+    description: "Edita un material existente por id (nombre, color, tileM, roughness, metalness, opacity 0..1).",
+    inputSchema: { type: "object", properties: { id: str, name: str, color: str, tileM: num, roughness: num, metalness: num, opacity: num }, required: ["id"] },
     handler: (a) => runCommand("update_material", a, "Editar material"),
   },
   // ---- biblioteca custom ----
@@ -469,8 +520,8 @@ const TOOLS = [
   // ---- selección y operaciones de grupo ----
   {
     name: "renderre_select",
-    description: "Selecciona un elemento por id. kind: wall | furniture | opening.",
-    inputSchema: { type: "object", properties: { kind: { enum: ["wall", "furniture", "opening"] }, id: str }, required: ["kind", "id"] },
+    description: "Selecciona un elemento por id. kind: wall | furniture | opening | surface.",
+    inputSchema: { type: "object", properties: { kind: { enum: ["wall", "furniture", "opening", "surface"] }, id: str }, required: ["kind", "id"] },
     handler: (a) => runCommand("select", a, "Seleccionar"),
   },
   {
@@ -478,7 +529,7 @@ const TOOLS = [
     description: "Fija una selección múltiple. refs = lista de { kind, id }.",
     inputSchema: {
       type: "object",
-      properties: { refs: { type: "array", items: { type: "object", properties: { kind: { enum: ["wall", "furniture", "opening"] }, id: str }, required: ["kind", "id"] } } },
+      properties: { refs: { type: "array", items: { type: "object", properties: { kind: { enum: ["wall", "furniture", "opening", "surface"] }, id: str }, required: ["kind", "id"] } } },
       required: ["refs"],
     },
     handler: (a) => runCommand("set_multi", a, "Selección múltiple"),
@@ -546,9 +597,21 @@ const TOOLS = [
   },
   {
     name: "renderre_set_tool",
-    description: "Cambia la herramienta activa del editor: select | wall | pan | furniture | opening.",
-    inputSchema: { type: "object", properties: { tool: { enum: ["select", "wall", "pan", "furniture", "opening"] } }, required: ["tool"] },
+    description: "Cambia la herramienta activa del editor: select | wall | pan | furniture | opening | surface.",
+    inputSchema: { type: "object", properties: { tool: { enum: ["select", "wall", "pan", "furniture", "opening", "surface"] } }, required: ["tool"] },
     handler: (a) => runCommand("set_tool", a, "Herramienta"),
+  },
+  {
+    name: "renderre_set_wall_kind",
+    description: `Fija el tipo de muro/cerco para los próximos trazos. kind ∈ ${WALL_KINDS.join(", ")}.`,
+    inputSchema: { type: "object", properties: { kind: { enum: WALL_KINDS } }, required: ["kind"] },
+    handler: (a) => runCommand("set_wall_kind", a, "Tipo de muro"),
+  },
+  {
+    name: "renderre_set_surface_material",
+    description: "Fija el material por defecto de las próximas superficies de suelo (materialId; omitir/null = sin material).",
+    inputSchema: { type: "object", properties: { materialId: str } },
+    handler: (a) => runCommand("set_surface_material", a, "Material de suelo"),
   },
   {
     name: "renderre_export_png",

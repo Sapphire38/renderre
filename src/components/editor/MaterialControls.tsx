@@ -51,6 +51,7 @@ export default function MaterialControls({ target }: { target: "selection" | "fl
   const selection = useEditor((s) => s.selection);
   const walls = useEditor((s) => s.walls);
   const furniture = useEditor((s) => s.furniture);
+  const surfaces = useEditor((s) => s.surfaces);
   const floorMaterialId = useEditor((s) => s.floorMaterialId);
   const addMaterial = useEditor((s) => s.addMaterial);
   const updateMaterial = useEditor((s) => s.updateMaterial);
@@ -67,7 +68,9 @@ export default function MaterialControls({ target }: { target: "selection" | "fl
         ? walls.find((w) => w.id === selection.id)?.materialId
         : selection?.kind === "furniture"
           ? furniture.find((f) => f.id === selection.id)?.materialId
-          : undefined;
+          : selection?.kind === "surface"
+            ? surfaces.find((x) => x.id === selection.id)?.materialId
+            : undefined;
   const current = materials.find((m) => m.id === currentId);
 
   const assign = (id: string | null) => (target === "floor" ? setFloor(id) : assignSel(id));
@@ -142,6 +145,22 @@ export default function MaterialControls({ target }: { target: "selection" | "fl
             max={1}
             step={0.05}
             onChange={(v) => updateMaterial(current.id, { roughness: v })}
+          />
+          <Slider
+            label="Metálico"
+            value={current.metalness}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={(v) => updateMaterial(current.id, { metalness: v })}
+          />
+          <Slider
+            label="Opacidad"
+            value={current.opacity ?? 1}
+            min={0.1}
+            max={1}
+            step={0.05}
+            onChange={(v) => updateMaterial(current.id, { opacity: v })}
           />
         </div>
       )}

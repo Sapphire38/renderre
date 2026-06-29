@@ -3,7 +3,9 @@
 import { useEditor } from "@/lib/store";
 import { angleDeg, formatLen, totalLength, wallLength } from "@/lib/geometry";
 import { OPENING_STYLES, defaultStyle } from "@/lib/openings";
-import type { Furniture, Opening, OpeningKind, RoofKind, Wall } from "@/lib/types";
+import { WALL_KINDS } from "@/lib/walls";
+import { SURFACE_SHAPES } from "@/lib/surfaces";
+import type { Furniture, Opening, OpeningKind, RoofKind, Surface, SurfaceShape, Wall, WallKind } from "@/lib/types";
 import { TrashIcon } from "./icons";
 import MaterialControls from "./MaterialControls";
 
@@ -105,6 +107,22 @@ function WallProps({ sel }: { sel: Wall }) {
           onChange={(e) => patch({ name: e.target.value })}
           className="w-40 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-sky-600"
         />
+      </Row>
+      <Row label="Tipo">
+        <select
+          value={sel.kind ?? "solid"}
+          onChange={(e) => {
+            beginEdit();
+            patch({ kind: e.target.value as WallKind });
+          }}
+          className="rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-sky-600"
+        >
+          {WALL_KINDS.map((k) => (
+            <option key={k.value} value={k.value}>
+              {k.label}
+            </option>
+          ))}
+        </select>
       </Row>
       <Row label="Largo">
         <NumField value={+len.toFixed(2)} unit="m" step={0.05} min={0.05} max={50} onFocus={beginEdit} onChange={(v) => setLargo(clamp(v, 0.05, 50))} />
@@ -401,9 +419,13 @@ function OpeningProps({ sel }: { sel: Opening }) {
       <Row label="Alto">
         <NumField value={Math.round(sel.height * 100)} unit="cm" min={20} max={300} onFocus={beginEdit} onChange={(v) => patch({ height: clamp(v / 100, 0.2, 3) })} />
       </Row>
-      {sel.kind === "window" && (
+      {sel.kind === "window" ? (
         <Row label="Antepecho">
           <NumField value={Math.round(sel.sill * 100)} unit="cm" min={0} max={200} onFocus={beginEdit} onChange={(v) => patch({ sill: clamp(v / 100, 0, 2) })} />
+        </Row>
+      ) : (
+        <Row label="Altura desde el piso">
+          <NumField value={Math.round(sel.sill * 100)} unit="cm" min={0} max={600} step={5} onFocus={beginEdit} onChange={(v) => patch({ sill: clamp(v / 100, 0, 6) })} />
         </Row>
       )}
       <Row label="Posición">
@@ -415,6 +437,76 @@ function OpeningProps({ sel }: { sel: Opening }) {
         className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-red-900/60 bg-red-950/40 py-1.5 text-sm text-red-300 hover:bg-red-900/40"
       >
         <TrashIcon width={15} height={15} /> Eliminar abertura
+      </button>
+    </Section>
+  );
+}
+
+function SurfaceProps({ sel }: { sel: Surface }) {
+  const removeSurface = useEditor((s) => s.removeSurface);
+  const beginEdit = () => useEditor.getState().pushHistory();
+  const patch = (p: Partial<Surface>) => {
+    const st = useEditor.getState();
+    st.setSurfaces(st.surfaces.map((x) => (x.id === sel.id ? { ...x, ...p } : x)));
+  };
+  return (
+    <Section title={sel.name ? `Suelo: ${sel.name}` : "Superficie de suelo"}>
+      <Row label="Nombre">
+        <input
+          value={sel.name ?? ""}
+          placeholder="Suelo"
+          onFocus={beginEdit}
+          onChange={(e) => patch({ name: e.target.value })}
+          className="w-40 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-sky-600"
+        />
+      </Row>
+      <Row label="Forma">
+        <select
+          value={sel.shape ?? "rect"}
+          onChange={(e) => {
+            beginEdit();
+            patch({ shape: e.target.value as SurfaceShape });
+          }}
+          className="rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-sky-600"
+        >
+          {SURFACE_SHAPES.map((sh) => (
+            <option key={sh.value} value={sh.value}>
+              {sh.label}
+            </option>
+          ))}
+        </select>
+      </Row>
+      <Row label={sel.shape === "circle" ? "Diámetro X" : "Ancho"}>
+        <NumField value={+sel.width.toFixed(2)} unit="m" step={0.1} min={0.1} max={80} onFocus={beginEdit} onChange={(v) => patch({ width: clamp(v, 0.1, 80) })} />
+      </Row>
+      <Row label={sel.shape === "circle" ? "Diámetro Z" : "Largo (Z)"}>
+        <NumField value={+sel.depth.toFixed(2)} unit="m" step={0.1} min={0.1} max={80} onFocus={beginEdit} onChange={(v) => patch({ depth: clamp(v, 0.1, 80) })} />
+      </Row>
+      <Row label="Posición X">
+        <NumField value={+sel.pos.x.toFixed(2)} unit="m" step={0.1} onFocus={beginEdit} onChange={(v) => patch({ pos: { ...sel.pos, x: v } })} />
+      </Row>
+      <Row label="Posición Z">
+        <NumField value={+sel.pos.z.toFixed(2)} unit="m" step={0.1} onFocus={beginEdit} onChange={(v) => patch({ pos: { ...sel.pos, z: v } })} />
+      </Row>
+      <Row label="Rotación">
+        <NumField value={Math.round(sel.rotDeg)} unit="°" step={15} onFocus={beginEdit} onChange={(v) => patch({ rotDeg: ((v % 360) + 360) % 360 })} />
+      </Row>
+      <Row label="Espesor">
+        <NumField value={Math.round((sel.thickness ?? 0.04) * 100)} unit="cm" min={1} max={50} onFocus={beginEdit} onChange={(v) => patch({ thickness: clamp(v / 100, 0.01, 0.5) })} />
+      </Row>
+      <Row label="Elevación">
+        <NumField value={Math.round((sel.lift ?? 0.01) * 100)} unit="cm" min={0} max={100} onFocus={beginEdit} onChange={(v) => patch({ lift: clamp(v / 100, 0, 1) })} />
+      </Row>
+      <p className="mt-1 text-[11px] leading-snug text-neutral-600">
+        La elevación apila suelos uno sobre otro (ej. deck sobre césped) y evita parpadeos.
+      </p>
+      <MaterialBlock target="selection" />
+      <button
+        type="button"
+        onClick={() => removeSurface(sel.id)}
+        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md border border-red-900/60 bg-red-950/40 py-1.5 text-sm text-red-300 hover:bg-red-900/40"
+      >
+        <TrashIcon width={15} height={15} /> Eliminar superficie
       </button>
     </Section>
   );
@@ -489,6 +581,7 @@ function RoofSection() {
           <option value="none">Sin techo</option>
           <option value="flat">Losa plana</option>
           <option value="gable">A dos aguas</option>
+          <option value="shed">Una caída</option>
         </select>
       </Row>
       {roof && (
@@ -496,12 +589,12 @@ function RoofSection() {
           <Row label="Altura aleros">
             <NumField value={+roof.height.toFixed(2)} unit="m" step={0.1} min={0.1} max={12} onChange={(v) => updateRoof(activeLevel, { height: clamp(v, 0.1, 12) })} />
           </Row>
-          {roof.kind === "gable" && (
+          {(roof.kind === "gable" || roof.kind === "shed") && (
             <>
-              <Row label="Alto cumbrera">
+              <Row label={roof.kind === "shed" ? "Alto lado alto" : "Alto cumbrera"}>
                 <NumField value={+roof.rise.toFixed(2)} unit="m" step={0.1} min={0} max={6} onChange={(v) => updateRoof(activeLevel, { rise: clamp(v, 0, 6) })} />
               </Row>
-              <Row label="Cumbrera">
+              <Row label={roof.kind === "shed" ? "Pendiente" : "Cumbrera"}>
                 <select
                   value={roof.ridgeAxis ?? "auto"}
                   onChange={(e) => updateRoof(activeLevel, { ridgeAxis: e.target.value === "auto" ? undefined : (e.target.value as "x" | "z") })}
@@ -605,6 +698,15 @@ function RenderSection() {
       <Row label="Sombras">
         <input type="checkbox" checked={render.shadows} onChange={(e) => setRender({ shadows: e.target.checked })} className="h-4 w-4 accent-sky-500" />
       </Row>
+      <Row label="Luz de lámparas">
+        <input type="checkbox" checked={render.lampLights !== false} onChange={(e) => setRender({ lampLights: e.target.checked })} className="h-4 w-4 accent-sky-500" />
+      </Row>
+      <Row label="Intensidad lámparas">
+        <NumField value={+(render.lampIntensity ?? 8).toFixed(1)} unit="" min={0} max={40} step={1} onChange={(v) => setRender({ lampIntensity: clamp(v, 0, 40) })} />
+      </Row>
+      <p className="mt-1 text-[11px] leading-snug text-neutral-600">
+        Las farolas, veladores, apliques, etc. proyectan luz cálida real (hasta 24 a la vez).
+      </p>
     </Section>
   );
 }
@@ -613,6 +715,7 @@ export default function PropertiesPanel() {
   const walls = useEditor((s) => s.walls);
   const furniture = useEditor((s) => s.furniture);
   const openings = useEditor((s) => s.openings);
+  const surfaces = useEditor((s) => s.surfaces);
   const selection = useEditor((s) => s.selection);
 
   const selWall = selection?.kind === "wall" ? walls.find((w) => w.id === selection.id) : null;
@@ -620,6 +723,8 @@ export default function PropertiesPanel() {
     selection?.kind === "furniture" ? furniture.find((f) => f.id === selection.id) : null;
   const selOpening =
     selection?.kind === "opening" ? openings.find((o) => o.id === selection.id) : null;
+  const selSurface =
+    selection?.kind === "surface" ? surfaces.find((x) => x.id === selection.id) : null;
 
   return (
     <div className="flex h-full flex-col bg-neutral-900 text-sm">
@@ -633,6 +738,9 @@ export default function PropertiesPanel() {
         <Row label="Aberturas">
           <span className="text-neutral-200">{openings.length}</span>
         </Row>
+        <Row label="Suelos">
+          <span className="text-neutral-200">{surfaces.length}</span>
+        </Row>
         <Row label="Longitud muros">
           <span className="text-neutral-200">{formatLen(totalLength(walls))}</span>
         </Row>
@@ -644,6 +752,8 @@ export default function PropertiesPanel() {
         <FurnitureProps sel={selFurn} />
       ) : selOpening ? (
         <OpeningProps sel={selOpening} />
+      ) : selSurface ? (
+        <SurfaceProps sel={selSurface} />
       ) : (
         <Section title="Selección">
           <p className="py-2 text-xs leading-relaxed text-neutral-500">

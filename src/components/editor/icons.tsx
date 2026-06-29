@@ -173,6 +173,25 @@ export const DoorIcon = (p: P) => (
   </svg>
 );
 
+// Superficie de suelo: rombo (plano en perspectiva) con textura punteada.
+export const SurfaceIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M12 4l9 5-9 5-9-5z" />
+    <path d="M3 9v3l9 5 9-5V9" />
+    <circle cx="9" cy="9" r="0.4" />
+    <circle cx="13" cy="11" r="0.4" />
+    <circle cx="11" cy="7.5" r="0.4" />
+  </svg>
+);
+
+// Cerco / alambrado: postes verticales con travesaños horizontales.
+export const FenceIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M6 4v16M12 4v16M18 4v16" />
+    <path d="M3 9h18M3 15h18" />
+  </svg>
+);
+
 export const CameraIcon = (p: P) => (
   <svg {...base(p)}>
     <path d="M3 9a1 1 0 011-1h2.2l1.3-2h6.8l1.3 2H20a1 1 0 011 1v9a1 1 0 01-1 1H4a1 1 0 01-1-1z" />

@@ -14,9 +14,12 @@ import type {
   Opening,
   OpeningKind,
   SelRef,
+  Surface,
+  SurfaceShape,
   ToolId,
   Vec2,
   Wall,
+  WallKind,
 } from "@/lib/types";
 
 type Args = Record<string, unknown>;
@@ -70,9 +73,12 @@ function snapshot() {
       walls: s.walls.length,
       furniture: s.furniture.length,
       openings: s.openings.length,
+      surfaces: s.surfaces.length,
       floors: s.floors.length,
     },
-    walls: s.walls.map((w) => ({ id: w.id, name: w.name, a: w.a, b: w.b, thickness: w.thickness, height: w.height, base: w.base, heightA: w.heightA, heightB: w.heightB, materialId: w.materialId, level: w.level ?? 0 })),
+    walls: s.walls.map((w) => ({ id: w.id, name: w.name, kind: w.kind ?? "solid", a: w.a, b: w.b, thickness: w.thickness, height: w.height, base: w.base, heightA: w.heightA, heightB: w.heightB, materialId: w.materialId, level: w.level ?? 0 })),
+    surfaces: s.surfaces.map((x) => ({ id: x.id, name: x.name, shape: x.shape ?? "rect", pos: x.pos, width: x.width, depth: x.depth, rotDeg: x.rotDeg, thickness: x.thickness, lift: x.lift, materialId: x.materialId, color: x.color, level: x.level ?? 0 })),
+    terrain: { enabled: s.terrain.enabled, cols: s.terrain.cols, rows: s.terrain.rows, cell: s.terrain.cell, origin: s.terrain.origin, materialId: s.terrain.materialId },
     furniture: s.furniture.map((f) => ({
       id: f.id, kind: f.kind, name: f.name, pos: f.pos, rotDeg: f.rotDeg,
       width: f.width, depth: f.depth, height: f.height, panel: f.panel, doors: f.doors, shelves: f.shelves,
@@ -80,9 +86,10 @@ function snapshot() {
       custom: f.kind === "custom",
     })),
     openings: s.openings.map((o) => ({ id: o.id, wallId: o.wallId, kind: o.kind, style: o.style, hinge: o.hinge, swing: o.swing, name: o.name, offset: o.offset, width: o.width, height: o.height, sill: o.sill, level: o.level ?? 0 })),
-    materials: s.materials.map((m) => ({ id: m.id, name: m.name, color: m.color, tileM: m.tileM, roughness: m.roughness, metalness: m.metalness })),
+    materials: s.materials.map((m) => ({ id: m.id, name: m.name, color: m.color, tileM: m.tileM, roughness: m.roughness, metalness: m.metalness, opacity: m.opacity ?? 1 })),
     floorMaterialId: s.floorMaterialId,
     render: s.render,
+    models: s.models.map((m) => ({ id: m.id, name: m.name, width: m.width, depth: m.depth, height: m.height })),
     customLibrary: s.customLibrary.map((f) => ({ id: f.id, name: f.name })),
     selection: s.selection,
     multi: s.multi,
@@ -90,6 +97,9 @@ function snapshot() {
     furnitureKind: s.furnitureKind,
     openingKind: s.openingKind,
     openingStyle: s.openingStyle,
+    wallKind: s.wallKind,
+    surfaceShape: s.surfaceShape,
+    surfaceMaterialId: s.surfaceMaterialId,
     grid: s.grid,
     wallDefaults: s.wallDefaults,
     // Resultado de la última generación por IA (qué entendió de la imagen + cuántos elementos creó)
@@ -187,11 +197,14 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       const b = vec(args.b);
       if (!a || !b) break;
       const id = st.addWall(a, b);
-      const patch: Record<string, number> = {};
+      const patch: Record<string, number | string> = {};
       for (const k of ["thickness", "height", "base", "heightA", "heightB"] as const) {
         if (args[k] !== undefined) patch[k] = num(args[k])!;
       }
-      if (id && Object.keys(patch).length) st.updateWall(id, patch);
+      if (typeof args.kind === "string") patch.kind = args.kind;
+      if (typeof args.name === "string") patch.name = args.name;
+      if (typeof args.materialId === "string") patch.materialId = args.materialId;
+      if (id && Object.keys(patch).length) st.updateWall(id, patch as Partial<Omit<Wall, "id">>);
       break;
     }
     case "add_furniture": {
@@ -281,8 +294,41 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       if (a) patch.a = a;
       if (b) patch.b = b;
       if (typeof args.name === "string") patch.name = args.name;
+      if (typeof args.kind === "string") patch.kind = args.kind;
       if ("materialId" in args) patch.materialId = args.materialId == null ? undefined : String(args.materialId);
       st.updateWall(id, patch as Partial<Omit<Wall, "id">>);
+      break;
+    }
+    case "add_surface": {
+      const pos = vec(args.pos) ?? { x: num(args.x) ?? 0, z: num(args.z) ?? 0 };
+      const size =
+        args.width !== undefined || args.depth !== undefined
+          ? { width: num(args.width) ?? 2, depth: num(args.depth) ?? 2 }
+          : undefined;
+      if (typeof args.shape === "string") st.setSurfaceShape(args.shape as SurfaceShape);
+      if ("materialId" in args) st.setSurfaceMaterial(args.materialId == null ? null : String(args.materialId));
+      const id = st.addSurface(pos, size);
+      const patch: Record<string, unknown> = {};
+      for (const k of ["rotDeg", "thickness", "lift"] as const) if (args[k] !== undefined) patch[k] = num(args[k]);
+      if (typeof args.name === "string") patch.name = args.name;
+      if (typeof args.color === "string") patch.color = args.color;
+      if (Object.keys(patch).length) st.updateSurface(id, patch as Partial<Omit<Surface, "id">>);
+      break;
+    }
+    case "update_surface": {
+      const id = String(args.id ?? "");
+      if (!useEditor.getState().surfaces.some((x) => x.id === id)) break;
+      const patch: Record<string, unknown> = {};
+      if (args.x !== undefined || args.z !== undefined) {
+        const cur = useEditor.getState().surfaces.find((x) => x.id === id)!;
+        patch.pos = { x: num(args.x) ?? cur.pos.x, z: num(args.z) ?? cur.pos.z };
+      }
+      for (const k of ["width", "depth", "rotDeg", "thickness", "lift"] as const) if (args[k] !== undefined) patch[k] = num(args[k]);
+      if (typeof args.shape === "string") patch.shape = args.shape;
+      if (typeof args.name === "string") patch.name = args.name;
+      if (typeof args.color === "string") patch.color = args.color;
+      if ("materialId" in args) patch.materialId = args.materialId == null ? undefined : String(args.materialId);
+      st.updateSurface(id, patch as Partial<Omit<Surface, "id">>);
       break;
     }
     case "update_opening": {
@@ -299,6 +345,7 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       const kind = String(args.kind ?? "furniture");
       if (kind === "wall") st.removeWall(id);
       else if (kind === "opening") st.removeOpening(id);
+      else if (kind === "surface") st.removeSurface(id);
       else st.removeFurniture(id);
       break;
     }
@@ -310,11 +357,29 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       break;
     case "set_render": {
       const patch: Record<string, unknown> = {};
-      for (const k of ["sunAzimuth", "sunElevation", "sunIntensity", "ambient"] as const)
+      for (const k of ["sunAzimuth", "sunElevation", "sunIntensity", "ambient", "lampIntensity"] as const)
         if (args[k] != null) patch[k] = Number(args[k]);
       if (args.background != null) patch.background = String(args.background);
       if (args.shadows != null) patch.shadows = Boolean(args.shadows);
+      if (args.lampLights != null) patch.lampLights = Boolean(args.lampLights);
       st.setRender(patch);
+      break;
+    }
+    case "set_terrain": {
+      const patch: Record<string, unknown> = {};
+      if (args.enabled != null) patch.enabled = Boolean(args.enabled);
+      if (args.materialId !== undefined) patch.materialId = args.materialId == null ? undefined : String(args.materialId);
+      if (Object.keys(patch).length) st.setTerrain(patch);
+      if (args.cols != null || args.rows != null || args.cell != null) {
+        const t = useEditor.getState().terrain;
+        st.resizeTerrain(Number(args.cols ?? t.cols), Number(args.rows ?? t.rows), Number(args.cell ?? t.cell));
+      }
+      if (args.reset) st.resetTerrain();
+      break;
+    }
+    case "sculpt_terrain": {
+      const mode = ["raise", "lower", "flatten", "smooth"].includes(String(args.mode)) ? (String(args.mode) as "raise" | "lower" | "flatten" | "smooth") : "raise";
+      st.sculptTerrain(Number(args.x ?? 0), Number(args.z ?? 0), Number(args.radius ?? 2), Number(args.strength ?? 0.3), mode);
       break;
     }
     case "set_pricing": {
@@ -330,6 +395,20 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       if (!libId && typeof args.name === "string") libId = lib.find((f) => f.name === args.name)?.id;
       if (libId) st.placeCustom(libId);
       else st.pushToast("No encontré ese mueble guardado", "warn");
+      break;
+    }
+    case "place_model": {
+      const lib = useEditor.getState().models;
+      let id = typeof args.id === "string" ? args.id : undefined;
+      if (!id && typeof args.name === "string") id = lib.find((m) => m.name === args.name)?.id;
+      if (id) st.placeModel(id);
+      else st.pushToast("No encontré ese modelo importado", "warn");
+      break;
+    }
+    case "remove_model": {
+      const lib = useEditor.getState().models;
+      const id = typeof args.id === "string" ? args.id : lib.find((m) => m.name === args.name)?.id;
+      if (id) st.removeModel(id);
       break;
     }
 
@@ -427,7 +506,7 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
 
     // --- techos ---
     case "set_roof":
-      st.setRoof(num(args.level) ?? st.activeLevel, String(args.kind ?? "flat") as "flat" | "gable");
+      st.setRoof(num(args.level) ?? st.activeLevel, String(args.kind ?? "flat") as "flat" | "gable" | "shed");
       break;
     case "update_roof": {
       const level = num(args.level) ?? st.activeLevel;
@@ -450,6 +529,7 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
         tileM: num(args.tileM) ?? 1,
         roughness: num(args.roughness) ?? 0.85,
         metalness: num(args.metalness) ?? 0,
+        ...(args.opacity !== undefined ? { opacity: num(args.opacity) } : {}),
       });
       st.pushToast(`Material creado: ${id}`, "ok");
       break;
@@ -460,7 +540,7 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       const patch: Record<string, unknown> = {};
       if (typeof args.name === "string") patch.name = args.name;
       if (typeof args.color === "string") patch.color = args.color;
-      for (const k of ["tileM", "roughness", "metalness"] as const) if (args[k] !== undefined) patch[k] = num(args[k]);
+      for (const k of ["tileM", "roughness", "metalness", "opacity"] as const) if (args[k] !== undefined) patch[k] = num(args[k]);
       st.updateMaterial(id, patch);
       break;
     }
@@ -480,6 +560,7 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       if (kind === "wall") st.selectWall(id);
       else if (kind === "furniture") st.selectFurniture(id);
       else if (kind === "opening") st.selectOpening(id);
+      else if (kind === "surface") st.selectSurface(id);
       break;
     }
     case "set_multi": {
@@ -550,6 +631,15 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       break;
     case "set_opening_style":
       st.setOpeningStyle(String(args.style ?? "swing"));
+      break;
+    case "set_wall_kind":
+      st.setWallKind(String(args.kind ?? "solid") as WallKind);
+      break;
+    case "set_surface_shape":
+      st.setSurfaceShape(String(args.shape ?? "rect") as SurfaceShape);
+      break;
+    case "set_surface_material":
+      st.setSurfaceMaterial(args.materialId == null ? null : String(args.materialId));
       break;
     case "export_png":
       window.dispatchEvent(new CustomEvent("renderre:exportpng"));

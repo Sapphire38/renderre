@@ -9,6 +9,7 @@ export default function FloorBar() {
   const addFloor = useEditor((s) => s.addFloor);
   const removeFloor = useEditor((s) => s.removeFloor);
   const setFloorElevation = useEditor((s) => s.setFloorElevation);
+  const setFloorAutoSlab = useEditor((s) => s.setFloorAutoSlab);
   const renameFloor = useEditor((s) => s.renameFloor);
 
   const active = floors[activeLevel];
@@ -66,6 +67,17 @@ export default function FloorBar() {
               if (!Number.isNaN(v)) setFloorElevation(activeLevel, v);
             }}
             className="w-14 rounded border border-neutral-800 bg-neutral-950 px-1 py-0.5 text-right text-neutral-100 outline-none focus:border-sky-600"
+          />
+        </label>
+      )}
+      {active && (
+        <label className="flex items-center justify-between gap-1 text-[11px] text-neutral-400" title="Si lo apagás, no se arma la losa de piso automática de este nivel (útil cuando el suelo lo define el terreno o las superficies).">
+          <span>Losa auto.</span>
+          <input
+            type="checkbox"
+            checked={active.autoSlab !== false}
+            onChange={(e) => setFloorAutoSlab(activeLevel, e.target.checked)}
+            className="h-3.5 w-3.5 accent-sky-500"
           />
         </label>
       )}
