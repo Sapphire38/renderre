@@ -46,7 +46,11 @@ export default function SurfaceBar() {
           )}
         </button>
       ))}
-      <span className="self-center px-2 text-[11px] text-neutral-500">← arrastrá un rectángulo en el plano</span>
+      <span className="self-center px-2 text-[11px] text-neutral-500">
+        {shape === "polygon"
+          ? "clic para agregar vértices · doble clic (o clic en el primero) para cerrar · doble clic en una arista/vértice para agregar/quitar"
+          : "← arrastrá un rectángulo en el plano"}
+      </span>
     </div>
   );
 }

@@ -460,9 +460,27 @@ function Surface3D({
   const repX = Math.max(1, Math.min(80, Math.round(s.width / tileM)));
   const repZ = Math.max(1, Math.min(80, Math.round(s.depth / tileM)));
   const material = usePbrMaterial(mat, s.color ?? "#7d7468", repX, repZ, selected);
+  const polyGeom = useMemo(() => {
+    if (s.shape !== "polygon" || !s.points || s.points.length < 3) return null;
+    const shape = new THREE.Shape();
+    s.points.forEach((p, i) => (i ? shape.lineTo(p.x, p.z) : shape.moveTo(p.x, p.z)));
+    shape.closePath();
+    return new THREE.ExtrudeGeometry(shape, { depth: th, bevelEnabled: false });
+  }, [s.shape, s.points, th]);
+  useEffect(() => () => polyGeom?.dispose(), [polyGeom]);
+  // Pendiente: inclina la losa alrededor de su centro hacia el azimut slopeDir.
+  const tiltQ = useMemo(() => {
+    if (!s.slopeDeg) return undefined;
+    const phi = ((s.slopeDir ?? 0) * Math.PI) / 180;
+    const axis = new THREE.Vector3(Math.sin(phi), 0, -Math.cos(phi)).normalize();
+    return new THREE.Quaternion().setFromAxisAngle(axis, (s.slopeDeg * Math.PI) / 180);
+  }, [s.slopeDir, s.slopeDeg]);
   return (
-    <group position={[s.pos.x, yOffset + lift, s.pos.z]} rotation={[0, -a, 0]}>
-      {s.shape === "circle" ? (
+    <group position={[s.pos.x, yOffset + lift, s.pos.z]} quaternion={tiltQ}>
+      <group rotation={[0, -a, 0]}>
+      {polyGeom ? (
+        <mesh geometry={polyGeom} material={material} rotation={[Math.PI / 2, 0, 0]} receiveShadow castShadow />
+      ) : s.shape === "circle" ? (
         <mesh position={[0, -th / 2, 0]} scale={[s.width, 1, s.depth]} material={material} receiveShadow castShadow>
           <cylinderGeometry args={[0.5, 0.5, th, 48]} />
         </mesh>
@@ -471,6 +489,7 @@ function Surface3D({
           <boxGeometry args={[s.width, th, s.depth]} />
         </mesh>
       )}
+      </group>
     </group>
   );
 }

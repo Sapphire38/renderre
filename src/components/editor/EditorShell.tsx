@@ -9,7 +9,6 @@ import OpeningBar from "./OpeningBar";
 import WallBar from "./WallBar";
 import SurfaceBar from "./SurfaceBar";
 import FloorBar from "./FloorBar";
-import AiPromptBar from "./AiPromptBar";
 import FurnitureWorkbench from "./FurnitureWorkbench";
 import TerrainEditor from "./TerrainEditor";
 import Viewport3D from "./Viewport3D";
@@ -30,7 +29,6 @@ export default function EditorShell() {
           <OpeningBar />
           <WallBar />
           <SurfaceBar />
-          <AiPromptBar />
           <TerrainEditor />
         </div>
         <aside className="flex w-[380px] shrink-0 flex-col border-l border-neutral-800">
