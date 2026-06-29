@@ -5,7 +5,6 @@ import { useEditor } from "@/lib/store";
 import FrontElevationEditor from "./FrontElevationEditor";
 import WorkbenchControls from "./WorkbenchControls";
 import WorkbenchPreview3D from "./WorkbenchPreview3D";
-import WorkbenchAiBar from "./WorkbenchAiBar";
 import WorkbenchCutList from "./WorkbenchCutList";
 import { CloseIcon, CabinetIcon, UndoIcon, RedoIcon, RulerIcon } from "./icons";
 import { isTypingTarget } from "@/lib/dom";
@@ -148,7 +147,6 @@ export default function FurnitureWorkbench() {
         </div>
         <div className="relative min-w-0 flex-1 border-r border-neutral-800">
           <FrontElevationEditor />
-          <WorkbenchAiBar />
         </div>
         <div className="relative w-[38%] min-w-[280px]">
           <WorkbenchPreview3D />

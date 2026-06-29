@@ -62,7 +62,7 @@ export type Floor = {
 };
 
 /** Forma de una superficie de suelo. */
-export type SurfaceShape = "rect" | "circle";
+export type SurfaceShape = "rect" | "circle" | "polygon";
 
 /**
  * Una superficie de suelo: un parche con su propio material (grabilla, césped, deck,
@@ -76,6 +76,11 @@ export type Surface = {
   depth: number; // tamaño en Z (m)
   rotDeg: number; // rotación alrededor del eje vertical (grados)
   shape?: SurfaceShape; // default "rect"
+  /** Sólo shape "polygon": vértices en coords LOCALES (relativas a pos, antes de rotar). */
+  points?: Vec2[];
+  /** Pendiente: dirección (azimut en grados, hacia dónde SUBE) e inclinación (grados, 0 = plano). */
+  slopeDir?: number;
+  slopeDeg?: number;
   materialId?: string;
   color?: string; // color de respaldo si no hay material
   level?: number; // piso/nivel (default 0)

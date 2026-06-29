@@ -29,7 +29,7 @@ import type {
 import { uid } from "./geometry";
 import { carcassPanels, customFromPreset, makeComponent, makeCustomFurniture, makeFurniture } from "./furniture";
 import { makeOpening, OPENING_STYLES, defaultStyle } from "./openings";
-import { makeSurface } from "./surfaces";
+import { makeSurface, makePolygonSurface } from "./surfaces";
 import { makeTerrain, sculpt as sculptHeights, type TerrainMode } from "./terrain";
 import { seedMaterials } from "./materials";
 import { DEFAULT_RENDER, DEFAULT_PRICING } from "./types";
@@ -156,6 +156,7 @@ export type EditorState = {
   updateWall: (id: string, patch: Partial<Omit<Wall, "id">>) => void;
 
   addSurface: (pos: Vec2, size?: { width: number; depth: number }) => string;
+  addPolygonSurface: (worldPts: Vec2[]) => string;
   removeSurface: (id: string) => void;
   updateSurface: (id: string, patch: Partial<Omit<Surface, "id">>) => void;
 
@@ -377,6 +378,21 @@ export const useEditor = create<EditorState>((set, get) => ({
       dirty: true,
     }));
     get().pushToast("Superficie agregada");
+    return s.id;
+  },
+  addPolygonSurface: (worldPts) => {
+    const s = makePolygonSurface(worldPts);
+    s.level = get().activeLevel;
+    const mid = get().surfaceMaterialId;
+    if (mid) s.materialId = mid;
+    get().pushHistory();
+    set((st) => ({
+      surfaces: [...st.surfaces, s],
+      selection: { kind: "surface", id: s.id },
+      multi: [],
+      dirty: true,
+    }));
+    get().pushToast("Suelo poligonal agregado");
     return s.id;
   },
   removeSurface: (id) => {

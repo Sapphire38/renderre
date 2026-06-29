@@ -56,6 +56,7 @@ type Gesture =
   | { type: "resize-surface"; id: string; committed: boolean; anchor: Vec2; ang: number }
   | { type: "draw-surface"; startWorld: Vec2; startSx: number; startSy: number }
   | { type: "marquee"; startWorld: Vec2; startSx: number; startSy: number; additive: boolean }
+  | { type: "move-svertex"; id: string; index: number; committed: boolean }
   | {
       type: "move-group";
       committed: boolean;
@@ -69,6 +70,12 @@ const selKey = (r: SelRef) => `${r.kind}:${r.id}`;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const norm360 = (d: number) => ((d % 360) + 360) % 360;
+const distToSeg = (p: Vec2, a: Vec2, b: Vec2) => {
+  const vx = b.x - a.x, vz = b.z - a.z;
+  const L = vx * vx + vz * vz;
+  const t = L > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.z - a.z) * vz) / L)) : 0;
+  return Math.hypot(p.x - (a.x + vx * t), p.z - (a.z + vz * t));
+};
 
 export default function PlanCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -83,6 +90,7 @@ export default function PlanCanvas() {
   const snapRef = useRef<Snap | null>(null);
   const cursorScreenRef = useRef<{ x: number; y: number } | null>(null);
   const spaceRef = useRef(false);
+  const polyDraftRef = useRef<Vec2[]>([]); // vértices (mundo) del polígono en curso de dibujo
 
   const propsRef = useRef<{
     walls: Wall[];
@@ -246,6 +254,38 @@ export default function PlanCanvas() {
     if (g && g.type === "draw-surface" && cur) {
       const a = worldToScreen(g.startWorld);
       drawSurfaceRect(ctx, a.x, a.y, cur.x, cur.y);
+    }
+
+    // polígono de suelo en curso de dibujo (clic a clic)
+    const pd = polyDraftRef.current;
+    if (tool === "surface" && pd.length > 0) {
+      ctx.save();
+      ctx.beginPath();
+      const p0 = worldToScreen(pd[0]);
+      ctx.moveTo(p0.x, p0.y);
+      for (let i = 1; i < pd.length; i++) { const p = worldToScreen(pd[i]); ctx.lineTo(p.x, p.y); }
+      if (cur) ctx.lineTo(cur.x, cur.y);
+      ctx.strokeStyle = "#6ee7b7";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      for (const wp of pd) {
+        const p = worldToScreen(wp);
+        ctx.fillStyle = "#0b0e14";
+        ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+        ctx.strokeStyle = "#6ee7b7";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(p.x - 3, p.y - 3, 6, 6);
+      }
+      if (pd.length >= 3) { // anillo en el primer vértice = cerrar
+        ctx.beginPath();
+        ctx.arc(p0.x, p0.y, 8, 0, Math.PI * 2);
+        ctx.strokeStyle = "#34d399";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
     drawHud(ctx, w, h, v, s, tool, walls, furniture, cursorScreenRef.current, sel.size);
@@ -447,7 +487,7 @@ export default function PlanCanvas() {
     };
   }, [schedule]);
 
-  const getPointer = (e: React.PointerEvent) => {
+  const getPointer = (e: { clientX: number; clientY: number }) => {
     const rect = canvasRef.current!.getBoundingClientRect();
     return { sx: e.clientX - rect.left, sy: e.clientY - rect.top };
   };
@@ -512,6 +552,20 @@ export default function PlanCanvas() {
 
     if (st.tool === "surface") {
       const snap = computeSnap(world);
+      if (st.surfaceShape === "polygon") {
+        // Polígono: cada clic agrega un vértice. Clic cerca del primero (≥3) lo cierra.
+        const pts = polyDraftRef.current;
+        if (pts.length >= 3 && Math.hypot(snap.point.x - pts[0].x, snap.point.z - pts[0].z) < 14 / scale()) {
+          st.addPolygonSurface(pts);
+          polyDraftRef.current = [];
+          st.setTool("select"); // listo para mover/editar vértices
+        } else {
+          pts.push({ ...snap.point });
+        }
+        snapRef.current = snap;
+        schedule();
+        return;
+      }
       gestureRef.current = { type: "draw-surface", startWorld: { ...snap.point }, startSx: sx, startSy: sy };
       snapRef.current = snap;
       schedule();
@@ -564,16 +618,26 @@ export default function PlanCanvas() {
         const sf = st.surfaces.find((x) => x.id === st.selection!.id);
         if (sf) {
           const cn = surfaceCorners(sf);
-          for (let i = 0; i < 4; i++) {
-            if (Math.hypot(world.x - cn[i].x, world.z - cn[i].z) < Math.max(10 / scale(), 0.08)) {
-              gestureRef.current = {
-                type: "resize-surface",
-                id: sf.id,
-                committed: false,
-                anchor: { ...cn[(i + 2) % 4] },
-                ang: (sf.rotDeg * Math.PI) / 180,
-              };
-              return;
+          if (sf.shape === "polygon") {
+            // arrastrar un vértice del polígono
+            for (let i = 0; i < cn.length; i++) {
+              if (Math.hypot(world.x - cn[i].x, world.z - cn[i].z) < Math.max(10 / scale(), 0.08)) {
+                gestureRef.current = { type: "move-svertex", id: sf.id, index: i, committed: false };
+                return;
+              }
+            }
+          } else {
+            for (let i = 0; i < 4; i++) {
+              if (Math.hypot(world.x - cn[i].x, world.z - cn[i].z) < Math.max(10 / scale(), 0.08)) {
+                gestureRef.current = {
+                  type: "resize-surface",
+                  id: sf.id,
+                  committed: false,
+                  anchor: { ...cn[(i + 2) % 4] },
+                  ang: (sf.rotDeg * Math.PI) / 180,
+                };
+                return;
+              }
             }
           }
         }
@@ -775,6 +839,23 @@ export default function PlanCanvas() {
       st.setSurfaces(
         st.surfaces.map((x) => (x.id === g.id ? { ...x, width: w, depth: d, pos: { x: cx, z: cz } } : x)),
       );
+      schedule();
+      return;
+    }
+
+    if (g && g.type === "move-svertex") {
+      const sf = st.surfaces.find((x) => x.id === g.id);
+      if (!sf || !sf.points) return;
+      if (!g.committed) { st.pushHistory(); g.committed = true; }
+      let wx = world.x, wz = world.z;
+      if (st.grid.snap) { wx = Math.round(wx / st.grid.cellM) * st.grid.cellM; wz = Math.round(wz / st.grid.cellM) * st.grid.cellM; }
+      // mundo → local (deshacer rotación y traslación al centro)
+      const a = -(sf.rotDeg * Math.PI) / 180;
+      const c = Math.cos(a), sn = Math.sin(a);
+      const dx = wx - sf.pos.x, dz = wz - sf.pos.z;
+      const u = dx * c - dz * sn, vv = dx * sn + dz * c;
+      const pts = sf.points.map((p, idx) => (idx === g.index ? { x: u, z: vv } : p));
+      st.setSurfaces(st.surfaces.map((x) => (x.id === g.id ? { ...x, points: pts } : x)));
       schedule();
       return;
     }
@@ -990,6 +1071,52 @@ export default function PlanCanvas() {
     }
   };
 
+  const onDoubleClick = (e: React.MouseEvent) => {
+    const st = useEditor.getState();
+    // 1) cerrar el polígono que se está dibujando
+    if (st.tool === "surface" && st.surfaceShape === "polygon" && polyDraftRef.current.length >= 3) {
+      st.addPolygonSurface(polyDraftRef.current);
+      polyDraftRef.current = [];
+      st.setTool("select"); // listo para mover/editar vértices
+      schedule();
+      return;
+    }
+    // 2) editar vértices de un polígono seleccionado (doble clic: borrar vértice / agregar en la arista)
+    const { sx, sy } = getPointer(e);
+    const world = screenToWorld(sx, sy);
+    if (st.selection?.kind === "surface") {
+      const sf = st.surfaces.find((x) => x.id === st.selection!.id);
+      if (sf && sf.shape === "polygon" && sf.points && sf.points.length >= 3) {
+        const cn = surfaceCorners(sf);
+        const tol = Math.max(10 / scale(), 0.12);
+        for (let i = 0; i < cn.length; i++) {
+          if (Math.hypot(world.x - cn[i].x, world.z - cn[i].z) < tol) {
+            if (sf.points.length > 3) st.updateSurface(sf.id, { points: sf.points.filter((_, k) => k !== i) });
+            schedule();
+            return;
+          }
+        }
+        let bestI = -1, bestD = tol;
+        for (let i = 0; i < cn.length; i++) {
+          const d = distToSeg(world, cn[i], cn[(i + 1) % cn.length]);
+          if (d < bestD) { bestD = d; bestI = i; }
+        }
+        if (bestI >= 0) {
+          const a = -(sf.rotDeg * Math.PI) / 180;
+          const c = Math.cos(a), sn = Math.sin(a);
+          const dx = world.x - sf.pos.x, dz = world.z - sf.pos.z;
+          const pts = [...sf.points];
+          pts.splice(bestI + 1, 0, { x: dx * c - dz * sn, z: dx * sn + dz * c });
+          st.updateSurface(sf.id, { points: pts });
+          schedule();
+          return;
+        }
+      }
+    }
+    draftStartRef.current = null;
+    schedule();
+  };
+
   const cursor =
     tool === "wall" || tool === "furniture" || tool === "opening" || tool === "surface"
       ? "crosshair"
@@ -1008,12 +1135,11 @@ export default function PlanCanvas() {
         onPointerUp={endGesture}
         onPointerCancel={endGesture}
         onPointerLeave={onPointerLeave}
-        onDoubleClick={() => {
-          draftStartRef.current = null;
-          schedule();
-        }}
+        onDoubleClick={onDoubleClick}
         onContextMenu={(e) => {
           e.preventDefault();
+          // botón derecho: cancela el polígono en curso o el muro en curso
+          if (polyDraftRef.current.length) polyDraftRef.current = [];
           draftStartRef.current = null;
           schedule();
         }}
@@ -1125,7 +1251,7 @@ function drawSurface(
     ctx.ellipse(cx, cy, (sf.width / 2) * s, (sf.depth / 2) * s, (sf.rotDeg * Math.PI) / 180, 0, Math.PI * 2);
   } else {
     ctx.moveTo(corners[0].x, corners[0].y);
-    for (let i = 1; i < 4; i++) ctx.lineTo(corners[i].x, corners[i].y);
+    for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i].x, corners[i].y);
     ctx.closePath();
   }
   ctx.fillStyle = hexA(col, selected ? 0.5 : 0.38);

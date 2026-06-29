@@ -53,16 +53,31 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
   const [showPrices, setShowPrices] = useState(false);
   const [tab, setTab] = useState<"list" | "cut">("list");
 
-  const { pieces, hw, budget } = useMemo(() => {
-    if (!draft) return { pieces: [], hw: { hinges: 0, slides: 0, pulls: 0, rods: 0 }, budget: null };
-    const p = cutList(draft);
-    const h = hardwareOf(draft);
-    return { pieces: p, hw: h, budget: budgetOf(p, h, pricing) };
-  }, [draft, pricing]);
-
+  // Despiece completo + cantidad A CORTAR por pieza (para comprar/cortar sólo lo que falta:
+  // ej. tengo 2 de 3 puertas → pongo 1; o 1 de 2 laterales ya cortado → pongo 1).
+  const allPieces = useMemo(() => (draft ? cutList(draft) : []), [draft]);
+  const rowKey = (p: { role: string; largo: number; ancho: number; thickness: number; materialId?: string }) =>
+    `${p.role}|${mm(p.largo)}|${mm(p.ancho)}|${mm(p.thickness)}|${p.materialId ?? ""}`;
+  const [cutQty, setCutQty] = useState<Record<string, number>>({});
+  const [includeHw, setIncludeHw] = useState(true);
+  const qtyOf = (p: (typeof allPieces)[number]) => {
+    const v = cutQty[rowKey(p)];
+    return v === undefined ? p.qty : Math.max(0, Math.min(p.qty, v));
+  };
+  const pieces = useMemo(
+    () => allPieces.map((p) => ({ ...p, qty: qtyOf(p) })).filter((p) => p.qty > 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allPieces, cutQty],
+  );
+  const fullHw = useMemo(() => (draft ? hardwareOf(draft) : { hinges: 0, slides: 0, pulls: 0, rods: 0 }), [draft]);
+  const hw = includeHw ? fullHw : { hinges: 0, slides: 0, pulls: 0, rods: 0 };
+  const budget = useMemo(() => budgetOf(pieces, hw, pricing), [pieces, hw, pricing]);
   const nesting = useMemo(() => nest(pieces, pricing.boardW, pricing.boardH), [pieces, pricing.boardW, pricing.boardH]);
+  const partial = !includeHw || allPieces.some((p) => qtyOf(p) !== p.qty);
+  const setQty = (p: (typeof allPieces)[number], v: number) =>
+    setCutQty((prev) => ({ ...prev, [rowKey(p)]: Math.max(0, Math.min(p.qty, Math.round(v) || 0)) }));
 
-  if (!draft || !budget) return null;
+  if (!draft) return null;
 
   const matName = (id?: string) => (id ? materials.find((m) => m.id === id)?.name ?? "—" : "MDF");
 
@@ -140,6 +155,20 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-4">
+        {/* Qué falta cortar: ajustá la cantidad "a cortar" de cada pieza en la tabla.
+            Sirve para comprar/cortar sólo lo pendiente (ej. ya tenés 2 de 3 puertas). */}
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-900/60 p-2 text-xs">
+          <span className="font-semibold uppercase tracking-wide text-neutral-500">A cortar:</span>
+          <span className="text-neutral-500">ajustá la cantidad de cada pieza en la columna <b className="text-neutral-300">“A cortar”</b> (ej. te falta sólo 1 de 3 puertas).</span>
+          <button type="button" onClick={() => setCutQty({})} className="rounded px-2 py-1 text-neutral-400 hover:bg-neutral-800">Todo</button>
+          <button type="button" onClick={() => { const m: Record<string, number> = {}; allPieces.forEach((p) => (m[rowKey(p)] = 0)); setCutQty(m); }} className="rounded px-2 py-1 text-neutral-400 hover:bg-neutral-800">Nada</button>
+          <label className="flex items-center gap-1.5 text-neutral-400">
+            <input type="checkbox" checked={includeHw} onChange={(e) => setIncludeHw(e.target.checked)} className="h-3.5 w-3.5 accent-sky-500" />
+            Incluir herrajes
+          </label>
+          {partial && <span className="ml-auto rounded bg-amber-500/15 px-2 py-0.5 text-amber-300">cálculo parcial</span>}
+        </div>
+
         {/* Resumen */}
         <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
           <div className={card}>
@@ -179,32 +208,46 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
                     <th className="px-3 py-2 text-right font-medium">Largo</th>
                     <th className="px-3 py-2 text-right font-medium">Ancho</th>
                     <th className="px-3 py-2 text-right font-medium">Esp.</th>
-                    <th className="px-3 py-2 text-right font-medium">Cant.</th>
+                    <th className="px-3 py-2 text-right font-medium">Total</th>
+                    <th className="px-3 py-2 text-center font-medium">A cortar</th>
                     <th className="px-3 py-2 text-right font-medium">Canto</th>
                     <th className="px-3 py-2 font-medium">Material</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {pieces.length === 0 ? (
+                  {allPieces.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-3 py-6 text-center text-neutral-500">
+                      <td colSpan={8} className="px-3 py-6 text-center text-neutral-500">
                         Este mueble no tiene placas de MDF (¿carcasa apagada y sin componentes?).
                       </td>
                     </tr>
                   ) : (
-                    pieces.map((p, i) => (
-                      <tr key={i} className="border-t border-neutral-800/80 text-neutral-200">
-                        <td className="px-3 py-1.5">{p.role}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">{mm(p.largo)}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">{mm(p.ancho)}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">{mm(p.thickness)}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums font-medium">{p.qty}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-neutral-400">
-                          {p.edgeMeters > 0 ? p.edgeMeters.toFixed(2) : "—"}
-                        </td>
-                        <td className="px-3 py-1.5 text-neutral-400">{matName(p.materialId)}</td>
-                      </tr>
-                    ))
+                    allPieces.map((p, i) => {
+                      const q = qtyOf(p);
+                      return (
+                        <tr key={i} className={["border-t border-neutral-800/80", q === 0 ? "text-neutral-600" : "text-neutral-200"].join(" ")}>
+                          <td className="px-3 py-1.5">{p.role}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{mm(p.largo)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{mm(p.ancho)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{mm(p.thickness)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{p.qty}</td>
+                          <td className="px-3 py-1.5 text-center">
+                            <input
+                              type="number"
+                              min={0}
+                              max={p.qty}
+                              value={q}
+                              onChange={(e) => setQty(p, parseFloat(e.target.value))}
+                              className={["w-14 rounded border bg-neutral-950 px-1.5 py-0.5 text-right tabular-nums outline-none focus:border-sky-600", q === 0 ? "border-neutral-800 text-neutral-500" : q < p.qty ? "border-amber-600/60 text-amber-300" : "border-neutral-700 text-neutral-100"].join(" ")}
+                            />
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums text-neutral-500">
+                            {p.edgeMeters > 0 ? (p.edgeMeters * q).toFixed(2) : "—"}
+                          </td>
+                          <td className="px-3 py-1.5 text-neutral-500">{matName(p.materialId)}</td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

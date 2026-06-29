@@ -1,0 +1,15 @@
+[mcp_servers.renderre]
+command = "node"
+args = ["mcp-server/renderre-mcp.mjs"]
+
+[mcp_servers.renderre.env]
+RENDERRE_URL = "http://localhost:3000"
+
+[mcp_servers.renderre.tools.renderre_add_surface]
+approval_mode = "approve"
+
+[mcp_servers.renderre.tools.renderre_get_state]
+approval_mode = "approve"
+
+[mcp_servers.renderre.tools.renderre_fit_view]
+approval_mode = "approve"

@@ -449,6 +449,16 @@ function SurfaceProps({ sel }: { sel: Surface }) {
     const st = useEditor.getState();
     st.setSurfaces(st.surfaces.map((x) => (x.id === sel.id ? { ...x, ...p } : x)));
   };
+  // esquinas del rectángulo (para convertir rect→polígono sin cambiar la huella)
+  const rectPts = (w: number, d: number) => [
+    { x: -w / 2, z: -d / 2 }, { x: w / 2, z: -d / 2 }, { x: w / 2, z: d / 2 }, { x: -w / 2, z: d / 2 },
+  ];
+  // polígono regular de n lados inscripto en el bbox (rx, rz)
+  const regularPts = (n: number, rx: number, rz: number) =>
+    Array.from({ length: n }, (_, i) => {
+      const t = (i / n) * Math.PI * 2 - Math.PI / 2;
+      return { x: Math.cos(t) * rx, z: Math.sin(t) * rz };
+    });
   return (
     <Section title={sel.name ? `Suelo: ${sel.name}` : "Superficie de suelo"}>
       <Row label="Nombre">
@@ -465,7 +475,13 @@ function SurfaceProps({ sel }: { sel: Surface }) {
           value={sel.shape ?? "rect"}
           onChange={(e) => {
             beginEdit();
-            patch({ shape: e.target.value as SurfaceShape });
+            const shape = e.target.value as SurfaceShape;
+            // al pasar a polígono, si no tiene vértices, arrancar con las 4 esquinas del rect
+            if (shape === "polygon" && (!sel.points || sel.points.length < 3)) {
+              patch({ shape, points: rectPts(sel.width, sel.depth) });
+            } else {
+              patch({ shape });
+            }
           }}
           className="rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-sky-600"
         >
@@ -476,6 +492,19 @@ function SurfaceProps({ sel }: { sel: Surface }) {
           ))}
         </select>
       </Row>
+      {sel.shape === "polygon" && (
+        <Row label="Vértices">
+          <NumField
+            value={sel.points?.length ?? 4}
+            unit=""
+            step={1}
+            min={3}
+            max={24}
+            onFocus={beginEdit}
+            onChange={(v) => patch({ points: regularPts(clamp(Math.round(v), 3, 24), sel.width / 2, sel.depth / 2) })}
+          />
+        </Row>
+      )}
       <Row label={sel.shape === "circle" ? "Diámetro X" : "Ancho"}>
         <NumField value={+sel.width.toFixed(2)} unit="m" step={0.1} min={0.1} max={80} onFocus={beginEdit} onChange={(v) => patch({ width: clamp(v, 0.1, 80) })} />
       </Row>
@@ -497,6 +526,14 @@ function SurfaceProps({ sel }: { sel: Surface }) {
       <Row label="Elevación">
         <NumField value={Math.round((sel.lift ?? 0.01) * 100)} unit="cm" min={0} max={100} onFocus={beginEdit} onChange={(v) => patch({ lift: clamp(v / 100, 0, 1) })} />
       </Row>
+      <Row label="Pendiente">
+        <NumField value={Math.round(sel.slopeDeg ?? 0)} unit="°" step={1} min={0} max={60} onFocus={beginEdit} onChange={(v) => patch({ slopeDeg: clamp(v, 0, 60) })} />
+      </Row>
+      {(sel.slopeDeg ?? 0) > 0 && (
+        <Row label="Dirección pend.">
+          <NumField value={Math.round(sel.slopeDir ?? 0)} unit="°" step={15} onFocus={beginEdit} onChange={(v) => patch({ slopeDir: ((v % 360) + 360) % 360 })} />
+        </Row>
+      )}
       <p className="mt-1 text-[11px] leading-snug text-neutral-600">
         La elevación apila suelos uno sobre otro (ej. deck sobre césped) y evita parpadeos.
       </p>
