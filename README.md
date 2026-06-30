@@ -25,6 +25,39 @@ npm run dev      # http://localhost:3000  (redirige a /editor)
 npm run build    # build de producción
 ```
 
+## Controlar desde Claude (MCP)
+
+Renderre incluye un **servidor MCP** (`mcp-server/renderre-mcp.mjs`) que deja
+manejar el editor desde **Claude** (Claude Code o Claude Desktop): podés pedirle
+en lenguaje natural que trace muros, coloque muebles, abra puertas/ventanas,
+genere una escena, guarde el proyecto, etc., y lo aplica **en vivo** sobre el
+editor abierto en el navegador.
+
+Cómo funciona: Claude habla por MCP (stdio) con `renderre-mcp.mjs`, que reenvía
+los comandos por HTTP al *bridge* de la app (`/api/mcp/*`); el editor abierto en
+el navegador hace polling y los aplica al instante.
+
+```
+Claude ──(MCP stdio)──► renderre-mcp.mjs ──(HTTP)──► Next.js /api/mcp/* ──► editor
+```
+
+**Puesta en marcha (Claude Code):**
+
+1. Corré la app: `npm run dev`.
+2. Abrí el editor en el navegador: `http://localhost:3000/editor` (necesario;
+   si no está abierto los comandos quedan encolados).
+3. Ya hay un `.mcp.json` en la raíz: al abrir el proyecto en Claude Code,
+   aprobá el server `renderre`. Verificá con `/mcp` que figure conectado.
+
+Para **Claude Desktop**, la lista completa de herramientas (`renderre_add_wall`,
+`renderre_generate`, `renderre_apply_scene`, `renderre_get_state`, …) y el
+ejemplo de configuración están en **[`mcp-server/README.md`](mcp-server/README.md)**.
+
+Ejemplo de pedido:
+
+> "Armá un dormitorio de 4×3 m con una puerta y una ventana, una cama contra la
+> pared del fondo y una mesa de luz al lado."
+
 ## Funciones
 
 ### Muros (vista 2D en planta)
