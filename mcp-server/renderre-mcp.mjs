@@ -108,20 +108,15 @@ const TOOLS = [
   {
     name: "renderre_generate",
     description:
-      "Genera una escena (muros, aberturas, muebles) a partir de una descripción en lenguaje natural en español, usando la IA del proyecto. Se SUMA a lo que ya hay. Ej: 'cocina de 4x3 con bajo mesada, mesada y alacena'.",
+      "Genera una escena (muros, aberturas, muebles) a partir de una descripción en lenguaje natural en español, usando el parser local del proyecto. Se SUMA a lo que ya hay. Ej: 'cocina de 4x3 con bajo mesada, mesada y alacena'. Para escenas exactas conviene renderre_apply_scene.",
     inputSchema: {
       type: "object",
       properties: {
         description: { ...str, description: "Descripción del espacio/mueble a generar" },
-        images: { type: "array", items: str, description: "Opcional: imágenes como data URLs (data:image/...) para lectura por visión" },
       },
       required: ["description"],
     },
-    handler: (a) => {
-      const payload = { description: String(a.description || "") };
-      if (Array.isArray(a.images) && a.images.length) payload.images = a.images;
-      return runCommand("generate", payload, "Generar");
-    },
+    handler: (a) => runCommand("generate", { description: String(a.description || "") }, "Generar"),
   },
   {
     name: "renderre_apply_scene",

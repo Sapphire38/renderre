@@ -24,11 +24,9 @@ import type {
 
 type Args = Record<string, unknown>;
 
-/** Resultado de la última generación por IA (para que Claude lo lea por get_state). */
+/** Resultado de la última generación por descripción (para que Claude lo lea por get_state). */
 let lastGenerate: {
   source?: string;
-  imageUsed?: boolean;
-  analysis?: string;
   created: { walls: number; furniture: number; openings: number };
 } | null = null;
 
@@ -102,7 +100,7 @@ function snapshot() {
     surfaceMaterialId: s.surfaceMaterialId,
     grid: s.grid,
     wallDefaults: s.wallDefaults,
-    // Resultado de la última generación por IA (qué entendió de la imagen + cuántos elementos creó)
+    // Resultado de la última generación por descripción (cuántos elementos creó)
     lastGenerate,
     // Proyecto completo (para exportar/llevar a otra PC vía renderre_export_project)
     project: s.exportData(),
@@ -246,11 +244,10 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
     }
     case "generate": {
       const description = String(args.description ?? "");
-      const images = Array.isArray(args.images) ? (args.images as string[]) : undefined;
       const res = await fetch("/api/ai/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description, images }),
+        body: JSON.stringify({ description }),
       });
       const data = await res.json();
       const spec: SceneSpec = data.spec ?? {};
@@ -259,11 +256,9 @@ async function applyCommand(type: string, args: Args = {}): Promise<void> {
       window.dispatchEvent(new CustomEvent("renderre:fit"));
       lastGenerate = {
         source: data.source,
-        imageUsed: !!data.imageUsed,
-        analysis: typeof data.analysis === "string" ? data.analysis : undefined,
         created: { walls: built.walls.length, furniture: built.furniture.length, openings: built.openings.length },
       };
-      st.pushToast(`IA: ${built.walls.length} muros · ${built.furniture.length} muebles · ${built.openings.length} aberturas`, "ok");
+      st.pushToast(`Generado: ${built.walls.length} muros · ${built.furniture.length} muebles · ${built.openings.length} aberturas`, "ok");
       break;
     }
 
