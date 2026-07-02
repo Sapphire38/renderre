@@ -93,14 +93,14 @@ export default function FurnitureWorkbench() {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-neutral-950 text-neutral-200">
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-neutral-800 px-4">
-        <div className="flex items-center gap-2">
-          <CabinetIcon width={18} height={18} className="text-sky-400" />
-          <span className="text-sm font-semibold">Taller de muebles</span>
-          <span className="text-neutral-600">·</span>
-          <span className="text-sm text-neutral-400">{draft.name}</span>
+      <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-neutral-800 px-3 sm:px-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <CabinetIcon width={18} height={18} className="shrink-0 text-sky-400" />
+          <span className="text-sm font-semibold">Taller</span>
+          <span className="hidden text-neutral-600 sm:inline">·</span>
+          <span className="hidden truncate text-sm text-neutral-400 sm:inline">{draft.name}</span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           <button type="button" onClick={undoDraft} disabled={!canUndo} title="Deshacer (Ctrl+Z)" className={toolBtn}>
             <UndoIcon width={16} height={16} />
           </button>
@@ -116,7 +116,7 @@ export default function FurnitureWorkbench() {
               showDims ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/40" : "text-neutral-400 hover:bg-neutral-800",
             ].join(" ")}
           >
-            <RulerIcon width={15} height={15} /> Cotas
+            <RulerIcon width={15} height={15} /> <span className="hidden sm:inline">Cotas</span>
           </button>
           <button
             type="button"
@@ -127,7 +127,7 @@ export default function FurnitureWorkbench() {
               showCutList ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/40" : "text-neutral-400 hover:bg-neutral-800",
             ].join(" ")}
           >
-            🧾 Despiece
+            🧾 <span className="hidden sm:inline">Despiece</span>
           </button>
           <button
             type="button"
@@ -140,15 +140,15 @@ export default function FurnitureWorkbench() {
         </div>
       </header>
 
-      <div className="relative flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1 overflow-x-auto lg:overflow-x-visible">
         {showCutList && <WorkbenchCutList onClose={() => setShowCutList(false)} />}
-        <div className="w-[300px] shrink-0 border-r border-neutral-800">
+        <div className="w-[280px] shrink-0 overflow-y-auto border-r border-neutral-800 sm:w-[300px]">
           <WorkbenchControls />
         </div>
-        <div className="relative min-w-0 flex-1 border-r border-neutral-800">
+        <div className="relative w-[88vw] shrink-0 border-r border-neutral-800 lg:w-auto lg:min-w-0 lg:flex-1">
           <FrontElevationEditor />
         </div>
-        <div className="relative w-[38%] min-w-[280px]">
+        <div className="relative w-[88vw] shrink-0 lg:w-[38%] lg:min-w-[280px]">
           <WorkbenchPreview3D />
           <div className="pointer-events-none absolute left-2 top-2 rounded bg-black/40 px-2 py-1 text-[11px] text-neutral-400">
             Vista 3D · arrastrá para orbitar

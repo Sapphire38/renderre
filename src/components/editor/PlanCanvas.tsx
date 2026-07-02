@@ -91,6 +91,9 @@ export default function PlanCanvas() {
   const cursorScreenRef = useRef<{ x: number; y: number } | null>(null);
   const spaceRef = useRef(false);
   const polyDraftRef = useRef<Vec2[]>([]); // vértices (mundo) del polígono en curso de dibujo
+  // Dedos activos (para zoom por pellizco / desplazamiento con dos dedos en táctil).
+  const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchRef = useRef<{ startDist: number; startZoom: number; worldX: number; worldZ: number } | null>(null);
 
   const propsRef = useRef<{
     walls: Wall[];
@@ -492,6 +495,58 @@ export default function PlanCanvas() {
     return { sx: e.clientX - rect.left, sy: e.clientY - rect.top };
   };
 
+  // Zoom hacia el centro del lienzo (botones +/− en móvil).
+  const zoomBy = (factor: number) => {
+    const { w, h } = sizeRef.current;
+    const v = viewRef.current;
+    const cx = w / 2, cy = h / 2;
+    const newZoom = clamp(v.zoom * factor, 0.05, 40);
+    const sB = PX_PER_M * v.zoom;
+    const sA = PX_PER_M * newZoom;
+    const wx = (cx - v.panX) / sB;
+    const wz = (cy - v.panY) / sB;
+    viewRef.current = { panX: cx - wx * sA, panY: cy - wz * sA, zoom: newZoom };
+    schedule();
+  };
+
+  // Comienza el gesto de pellizco cuando hay dos dedos sobre el lienzo.
+  const beginPinch = () => {
+    const pts = [...pointersRef.current.values()].slice(0, 2);
+    if (pts.length < 2) return;
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const midSx = (pts[0].x + pts[1].x) / 2 - rect.left;
+    const midSy = (pts[0].y + pts[1].y) / 2 - rect.top;
+    const world = screenToWorld(midSx, midSy);
+    pinchRef.current = {
+      startDist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1,
+      startZoom: viewRef.current.zoom,
+      worldX: world.x,
+      worldZ: world.z,
+    };
+    // Cancelamos cualquier gesto/boceto de un dedo para no crear geometría por accidente.
+    gestureRef.current = null;
+    draftStartRef.current = null;
+    snapRef.current = null;
+    schedule();
+  };
+
+  // Zoom + desplazamiento combinados: mantiene bajo el punto medio actual el punto
+  // del mundo que estaba bajo el punto medio inicial, y escala según la separación.
+  const updatePinch = () => {
+    const p = pinchRef.current;
+    if (!p) return;
+    const pts = [...pointersRef.current.values()].slice(0, 2);
+    if (pts.length < 2) return;
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const midSx = (pts[0].x + pts[1].x) / 2 - rect.left;
+    const midSy = (pts[0].y + pts[1].y) / 2 - rect.top;
+    const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+    const newZoom = clamp(p.startZoom * (dist / p.startDist), 0.05, 40);
+    const sA = PX_PER_M * newZoom;
+    viewRef.current = { panX: midSx - p.worldX * sA, panY: midSy - p.worldZ * sA, zoom: newZoom };
+    schedule();
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     const canvas = canvasRef.current!;
     try {
@@ -501,6 +556,12 @@ export default function PlanCanvas() {
     }
     const { sx, sy } = getPointer(e);
     cursorScreenRef.current = { x: sx, y: sy };
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    // Segundo dedo: pasamos a zoom por pellizco y frenamos cualquier gesto de un dedo.
+    if (pointersRef.current.size >= 2) {
+      beginPinch();
+      return;
+    }
     const st = useEditor.getState();
     const world = screenToWorld(sx, sy);
     const onLvl = <T extends { level?: number }>(arr: T[]) => arr.filter((x) => (x.level ?? 0) === st.activeLevel);
@@ -730,6 +791,13 @@ export default function PlanCanvas() {
   const onPointerMove = (e: React.PointerEvent) => {
     const { sx, sy } = getPointer(e);
     cursorScreenRef.current = { x: sx, y: sy };
+    if (pointersRef.current.has(e.pointerId)) {
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    if (pinchRef.current && pointersRef.current.size >= 2) {
+      updatePinch();
+      return;
+    }
     const st = useEditor.getState();
     const world = screenToWorld(sx, sy);
     const g = gestureRef.current;
@@ -988,6 +1056,8 @@ export default function PlanCanvas() {
     } catch {
       /* ignore */
     }
+    pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size < 2) pinchRef.current = null;
     const g = gestureRef.current;
     if (g && g.type === "draw-surface") {
       const { sx, sy } = getPointer(e);
@@ -1144,6 +1214,27 @@ export default function PlanCanvas() {
           schedule();
         }}
       />
+
+      {/* Zoom táctil (solo móvil/tablet): el zoom por rueda no existe en pantallas táctiles.
+          También se puede hacer zoom con dos dedos (pellizco). */}
+      <div className="absolute right-3 top-1/2 z-20 flex -translate-y-1/2 flex-col gap-1.5 lg:hidden">
+        <button
+          type="button"
+          onClick={() => zoomBy(1.3)}
+          title="Acercar"
+          className="grid h-11 w-11 place-items-center rounded-full bg-neutral-800/90 text-2xl leading-none text-neutral-100 shadow-lg backdrop-blur active:bg-neutral-700"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          onClick={() => zoomBy(1 / 1.3)}
+          title="Alejar"
+          className="grid h-11 w-11 place-items-center rounded-full bg-neutral-800/90 text-2xl leading-none text-neutral-100 shadow-lg backdrop-blur active:bg-neutral-700"
+        >
+          −
+        </button>
+      </div>
     </div>
   );
 }
