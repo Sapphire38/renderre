@@ -53,7 +53,7 @@ Windows: `%APPDATA%\Claude\`) y reiniciá Claude Desktop:
 | Tool | Qué hace |
 |------|----------|
 | `renderre_get_state` | Lee el diseño actual (pisos, muros, muebles, aberturas, selección). |
-| `renderre_generate` | Genera una escena desde una descripción en español (IA). |
+| `renderre_generate` | Genera una escena desde una descripción en español (parser local). |
 | `renderre_apply_scene` | Aplica una escena estructurada (`room`/`walls`/`openings`/`furniture`). |
 | `renderre_add_wall` | Agrega un muro entre dos puntos `[x,z]`. |
 | `renderre_add_furniture` | Agrega un mueble/equipamiento en `(x,z)`. |

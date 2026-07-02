@@ -2,14 +2,14 @@
 
 Editor para **diseñar casas y muebles de MDF** y simular espacios: trazás muros sobre una
 cuadrícula en planta (2D), colocás muebles paramétricos y lo ves todo extruido en **3D** en tiempo
-real. Podés **generar muros y muebles a partir de una descripción** ("habitación de 4x3 con un
-placard de 1.8m y 3 puertas") y guardar los proyectos por nombre.
+real. Desde **Claude (vía MCP)** podés además **generar muros y muebles describiendo el espacio**
+("habitación de 4x3 con un placard de 1.8m y 3 puertas") y guardar los proyectos por nombre.
 
-> Estado: muros + **muebles MDF** + **generación por IA**, todo en 2D + 3D, con proyectos guardables.
+> Estado: muros + **muebles MDF**, todo en 2D + 3D, con proyectos guardables y control desde Claude (MCP).
 
 ## Stack
 
-- **Next.js 15** (App Router, TypeScript) + ruta API `/api/ai/generate`
+- **Next.js 15** (App Router, TypeScript) + bridge MCP en `/api/mcp/*`
 - **react-three-fiber** + **drei** + **three** (vista 3D)
 - **Zustand** (estado del editor, con undo/redo)
 - **Tailwind CSS v4** (UI)
@@ -24,6 +24,39 @@ npm install
 npm run dev      # http://localhost:3000  (redirige a /editor)
 npm run build    # build de producción
 ```
+
+## Controlar desde Claude (MCP)
+
+Renderre incluye un **servidor MCP** (`mcp-server/renderre-mcp.mjs`) que deja
+manejar el editor desde **Claude** (Claude Code o Claude Desktop): podés pedirle
+en lenguaje natural que trace muros, coloque muebles, abra puertas/ventanas,
+genere una escena, guarde el proyecto, etc., y lo aplica **en vivo** sobre el
+editor abierto en el navegador.
+
+Cómo funciona: Claude habla por MCP (stdio) con `renderre-mcp.mjs`, que reenvía
+los comandos por HTTP al *bridge* de la app (`/api/mcp/*`); el editor abierto en
+el navegador hace polling y los aplica al instante.
+
+```
+Claude ──(MCP stdio)──► renderre-mcp.mjs ──(HTTP)──► Next.js /api/mcp/* ──► editor
+```
+
+**Puesta en marcha (Claude Code):**
+
+1. Corré la app: `npm run dev`.
+2. Abrí el editor en el navegador: `http://localhost:3000/editor` (necesario;
+   si no está abierto los comandos quedan encolados).
+3. Ya hay un `.mcp.json` en la raíz: al abrir el proyecto en Claude Code,
+   aprobá el server `renderre`. Verificá con `/mcp` que figure conectado.
+
+Para **Claude Desktop**, la lista completa de herramientas (`renderre_add_wall`,
+`renderre_generate`, `renderre_apply_scene`, `renderre_get_state`, …) y el
+ejemplo de configuración están en **[`mcp-server/README.md`](mcp-server/README.md)**.
+
+Ejemplo de pedido:
+
+> "Armá un dormitorio de 4×3 m con una puerta y una ventana, una cama contra la
+> pared del fondo y una mesa de luz al lado."
 
 ## Funciones
 
@@ -48,19 +81,15 @@ npm run build    # build de producción
   en otro), o "auto" para heredar el del mueble.
 - **Editor de alzado frontal**: arrastrás y redimensionás los componentes sobre la cara del mueble,
   con **vista 3D en vivo** al lado (puertas que abren, cajones que salen).
-- **IA en el taller**: describí el mueble ("placard 1.8x2.4 con 3 corredizas y 4 cajones a la
-  izquierda") y arma la carcasa + componentes automáticamente (DeepSeek/MiniMax o parser local), con
-  auto-layout por lados/regiones.
 - "Guardar y colocar" lo agrega al plano y a tu biblioteca **Mis muebles** (reutilizable desde el
   catálogo). Los muebles propios se pueden volver a abrir con "✎ Editar en el taller".
 
-### Generar por IA (texto → escena)
-- Barra inferior: escribí una descripción y se crean los muros/muebles. Ej:
-  - `habitación de 4x3`
-  - `cocina de 5x3 con bajo mesada de 1.2m, mesada y alacena`
-  - `placard de 1.8m con 3 puertas`
-- Funciona **sin API key** con un parser local en español. Si configurás una key, usa el LLM
-  (mejor comprensión). Ver "IA: proveedores".
+### Generar por descripción (texto → escena)
+- Desde **Claude (MCP)** con la tool `renderre_generate`: describís el espacio y se crean los
+  muros/muebles. Ej: `cocina de 5x3 con bajo mesada de 1.2m, mesada y alacena`,
+  `placard de 1.8m con 3 puertas`.
+- Lo resuelve un **parser local en español** (sin claves ni servicios externos). Para escenas
+  exactas conviene `renderre_apply_scene`. Ver [Controlar desde Claude (MCP)](#controlar-desde-claude-mcp).
 
 ### Materiales y texturas
 - Librería de materiales (presets de MDF, melamina, madera, etc.). Asigná un material a un **muro,
@@ -98,34 +127,14 @@ npm run build    # build de producción
 | `Supr` | Borrar selección |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Deshacer / Rehacer |
 
-## IA: proveedores
-
-La ruta `POST /api/ai/generate` intenta usar un LLM si hay variables de entorno; si no, cae al
-parser local. Copiá `.env.example` a `.env.local` y completá una opción:
-
-- **DeepSeek** (texto): `DEEPSEEK_API_KEY=...`
-- **OpenAI-compatible** (MiniMax, OpenAI, etc.): `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL`
-
-### Visión (📷 subir foto / plano)
-Las barras de IA (plano y Taller) tienen un botón **📷** para subir una imagen y recrear a partir de
-ella + las medidas que tipees:
-- **Plano arquitectónico (PNG)** → traza **muros + puertas y ventanas** (leyendo cotas o la medida
-  total que indiques para la escala).
-- **Foto** de un mueble/ambiente → lo reconstruye.
-
-Requiere un proveedor con **visión**:
-- **MiniMax-M3** (lee imágenes): `AI_BASE_URL=https://api.minimax.io/v1`, `AI_MODEL=MiniMax-M3`.
-- También sirven GPT-4o, Gemini o Claude (cualquier endpoint OpenAI-compatible con visión).
-- La **API de DeepSeek NO acepta imágenes** (solo texto). Sin proveedor de visión, la foto se ignora
-  y se usa solo el texto (te lo avisa).
-
 ## Estructura
 
 ```
 src/
   app/
     editor/page.tsx            # editor (solo cliente)
-    api/ai/generate/route.ts   # IA: descripción → SceneSpec (LLM o fallback local)
+    api/mcp/*                  # bridge MCP: command / poll / state
+    api/ai/generate/route.ts   # parser local español → SceneSpec (tool renderre_generate)
   components/editor/
     EditorShell.tsx            # layout general
     ProjectBar.tsx             # guardar / abrir / nuevo
@@ -136,7 +145,7 @@ src/
     FurnitureCatalog.tsx       # catálogo de presets MDF
     OpeningBar.tsx             # selector puerta/ventana
     MaterialControls.tsx       # swatches + subir imagen + sliders de material
-    AiPromptBar.tsx            # barra de generación por IA
+    McpBridge.tsx              # aplica los comandos del MCP al editor
     FurnitureWorkbench.tsx     # Taller: entorno a pantalla completa
     FrontElevationEditor.tsx   # editor visual del alzado frontal (drag/resize)
     WorkbenchControls.tsx      # carcasa + agregar/editar componentes
@@ -156,7 +165,7 @@ docs/
 
 1. **Muros** ✅ — canvas 2D, trazado, snapping, cotas, edición, preview 3D, proyectos.
 2. **Muebles MDF** ✅ — catálogo paramétrico, colocar/mover/rotar/editar en 2D + 3D.
-3. **IA por descripción** ✅ — texto → muros + muebles (parser local + DeepSeek/MiniMax).
+3. **Generar por descripción** ✅ — texto → muros + muebles con parser local (tool `renderre_generate` del MCP).
 4. **Materiales y texturas** ✅ — librería + asignar a muros/muebles/piso + subir imagen → PBR
    (albedo + normal). Guía CC0 en `docs/materiales-investigacion.json`.
 5. **Aberturas** ✅ — puertas y ventanas (huecos en muros) en 2D y 3D, editables.

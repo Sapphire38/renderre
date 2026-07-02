@@ -21,7 +21,6 @@ yarn-error.log*
 
 # env files
 .env*
-!.env.example
 
 # typescript
 *.tsbuildinfo
@@ -31,3 +30,7 @@ next-env.d.ts
 .vscode/*
 !.vscode/extensions.json
 .idea
+
+# proyecto exportado (no versionar)
+Casa_Vale.renderre.json
+*.renderre.json
