@@ -24,12 +24,14 @@ function SculptMesh({
   mode,
   radius,
   strength,
+  enabled,
   onHover,
 }: {
   terrain: Terrain;
   mode: TerrainMode;
   radius: number;
   strength: number;
+  enabled: boolean;
   onHover: (p: THREE.Vector3 | null) => void;
 }) {
   const drawing = useRef(false);
@@ -65,15 +67,17 @@ function SculptMesh({
       geometry={geom}
       receiveShadow
       onPointerDown={(e) => {
-        if ((e.nativeEvent as PointerEvent).button !== 0) return; // sólo botón izquierdo esculpe
+        // En modo "girar" el mesh no esculpe: dejamos que OrbitControls maneje el gesto.
+        if (!enabled) return;
+        if ((e.nativeEvent as PointerEvent).button !== 0) return; // sólo botón izquierdo/toque esculpe
         e.stopPropagation();
         drawing.current = true;
         (e.target as Element).setPointerCapture?.((e.nativeEvent as PointerEvent).pointerId);
         apply(e);
       }}
       onPointerMove={(e) => {
-        onHover(e.point.clone());
-        if (drawing.current) { e.stopPropagation(); apply(e); }
+        onHover(enabled ? e.point.clone() : null);
+        if (enabled && drawing.current) { e.stopPropagation(); apply(e); }
       }}
       onPointerUp={() => { drawing.current = false; }}
       onPointerOut={() => { drawing.current = false; onHover(null); }}
@@ -147,6 +151,9 @@ export default function TerrainEditor() {
   const floors = useEditor((s) => s.floors);
 
   const [mode, setMode] = useState<TerrainMode>("raise");
+  // "sculpt" = un dedo/clic izq. esculpe · "orbit" = un dedo/clic izq. gira la vista.
+  // Imprescindible en táctil, donde no hay botón derecho para rotar.
+  const [viewMode, setViewMode] = useState<"sculpt" | "orbit">("sculpt");
   const [radius, setRadius] = useState(2.5);
   const [strength, setStrength] = useState(0.25);
   const [selFloor, setSelFloor] = useState(0);
@@ -201,16 +208,17 @@ export default function TerrainEditor() {
 
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-neutral-950 text-neutral-200">
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-neutral-800 px-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">⛰ Editor de terreno</span>
-          <span className="text-neutral-600">·</span>
-          <span className="text-xs text-neutral-500">relieve {range.min.toFixed(2)} … {range.max.toFixed(2)} m</span>
+      <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-neutral-800 px-3 sm:px-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-semibold">⛰ <span className="hidden sm:inline">Editor de </span>Terreno</span>
+          <span className="hidden text-neutral-600 sm:inline">·</span>
+          <span className="hidden text-xs text-neutral-500 sm:inline">relieve {range.min.toFixed(2)} … {range.max.toFixed(2)} m</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <label className="flex items-center gap-1.5 text-xs text-neutral-400">
             <input type="checkbox" checked={terrain.enabled} onChange={(e) => setTerrain({ enabled: e.target.checked })} className="h-4 w-4 accent-sky-500" />
-            Mostrar en la escena
+            <span className="hidden sm:inline">Mostrar en la escena</span>
+            <span className="sm:hidden">En escena</span>
           </label>
           <button type="button" onClick={() => setOpen(false)} className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500">
             Listo
@@ -218,9 +226,9 @@ export default function TerrainEditor() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        {/* Panel de herramientas */}
-        <div className="w-[250px] shrink-0 overflow-auto border-r border-neutral-800 p-3">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        {/* Panel de herramientas: a la izquierda en escritorio, abajo (con scroll) en móvil. */}
+        <div className="order-2 max-h-[45%] w-full shrink-0 overflow-auto border-t border-neutral-800 p-3 lg:order-1 lg:max-h-none lg:w-[250px] lg:border-r lg:border-t-0">
           <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Herramienta</h3>
           <div className="mb-3 grid grid-cols-2 gap-1.5">
             {(Object.keys(MODE_LABEL) as TerrainMode[]).map((m) => (
@@ -241,9 +249,10 @@ export default function TerrainEditor() {
 
           <div className="rounded-md border border-neutral-800 bg-neutral-900/60 p-2 text-[11px] leading-relaxed text-neutral-400">
             <b className="text-neutral-300">Cómo se usa</b><br />
-            • Arrastrá con el <b>botón izquierdo</b> sobre el terreno para esculpir.<br />
+            • Modo <b>✏️ Esculpir</b>: arrastrá (o tocá) sobre el terreno para modelar el relieve.<br />
             • <b>Shift</b> mientras arrastrás = invertir (bajar/subir).<br />
-            • <b>Botón derecho</b> = rotar la vista · <b>rueda</b> = zoom.
+            • Modo <b>🔄 Girar</b>: arrastrá para rotar la vista.<br />
+            • Dos dedos (o rueda / botón derecho) = zoom y giro.
           </div>
 
           <h3 className="mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Tamaño del terreno</h3>
@@ -346,14 +355,14 @@ export default function TerrainEditor() {
         </div>
 
         {/* Vista 3D de esculpido */}
-        <div className="relative min-w-0 flex-1">
+        <div className="relative order-1 min-h-0 min-w-0 flex-1 lg:order-2">
           <Canvas shadows dpr={[1, 2]} camera={{ fov: 45, near: 0.1, far: 1000 }} style={{ touchAction: "none" }}>
             <color attach="background" args={["#0e1420"]} />
             <hemisphereLight args={["#dfe7ff", "#20242c", 0.7]} />
             <ambientLight intensity={0.3} />
             <directionalLight position={[20, 30, 12]} intensity={1.4} castShadow shadow-mapSize={[2048, 2048]} />
             <SceneSetup terrain={terrain} />
-            <SculptMesh terrain={terrain} mode={mode} radius={radius} strength={strength} onHover={setHover} />
+            <SculptMesh terrain={terrain} mode={mode} radius={radius} strength={strength} enabled={viewMode === "sculpt"} onHover={setHover} />
             <BrushRing pos={hover} radius={radius} mode={mode} />
             <WallsReference walls={walls} floors={floors} hidden={hiddenFloors} />
             <Grid args={[200, 200]} cellSize={1} cellThickness={0.4} cellColor="#2a3850" sectionSize={5} sectionColor="#3b4a6b" fadeDistance={Math.max(40, terrain.cols * terrain.cell * 1.5)} infiniteGrid position={[0, -0.01, 0]} />
@@ -361,11 +370,41 @@ export default function TerrainEditor() {
               makeDefault
               enableDamping
               target={[0, 0, 0]}
-              mouseButtons={{ LEFT: undefined as unknown as THREE.MOUSE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }}
+              mouseButtons={
+                viewMode === "orbit"
+                  ? { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }
+                  : { MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }
+              }
+              touches={
+                viewMode === "orbit"
+                  ? { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }
+                  : { TWO: THREE.TOUCH.DOLLY_ROTATE }
+              }
             />
           </Canvas>
-          <div className="pointer-events-none absolute left-3 top-2 rounded bg-black/40 px-2 py-1 text-[11px] text-neutral-300">
-            Arrastrá (botón izq.) para esculpir · Shift = invertir · botón der. = rotar
+
+          {/* Selector Esculpir / Girar: en táctil no hay botón derecho para rotar. */}
+          <div className="pointer-events-auto absolute left-1/2 top-2 z-10 flex -translate-x-1/2 gap-0.5 rounded-lg border border-neutral-700 bg-neutral-900/90 p-0.5 text-xs shadow-lg backdrop-blur">
+            <button
+              type="button"
+              onClick={() => setViewMode("sculpt")}
+              className={["rounded-md px-3 py-1.5", viewMode === "sculpt" ? "bg-sky-500/25 text-sky-200 ring-1 ring-sky-500/50" : "text-neutral-300 hover:bg-neutral-800"].join(" ")}
+            >
+              ✏️ Esculpir
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("orbit")}
+              className={["rounded-md px-3 py-1.5", viewMode === "orbit" ? "bg-sky-500/25 text-sky-200 ring-1 ring-sky-500/50" : "text-neutral-300 hover:bg-neutral-800"].join(" ")}
+            >
+              🔄 Girar
+            </button>
+          </div>
+
+          <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded bg-black/40 px-2 py-1 text-center text-[11px] text-neutral-300">
+            {viewMode === "sculpt"
+              ? "Arrastrá para esculpir · Shift = invertir · dos dedos = zoom/giro"
+              : "Arrastrá para girar la vista · dos dedos = zoom"}
           </div>
         </div>
       </div>

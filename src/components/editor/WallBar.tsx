@@ -17,14 +17,14 @@ export default function WallBar() {
     ].join(" ");
 
   return (
-    <div className="pointer-events-auto absolute left-1/2 top-3 z-20 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center gap-1 rounded-lg border border-neutral-800 bg-neutral-900/95 p-1.5 shadow-xl backdrop-blur">
-      <span className="self-center pl-1 pr-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Tipo</span>
+    <div className="no-scrollbar pointer-events-auto absolute left-1/2 top-3 z-20 flex max-w-[calc(100%-1rem)] -translate-x-1/2 flex-nowrap items-center gap-1 overflow-x-auto rounded-lg border border-neutral-800 bg-neutral-900/95 p-1.5 shadow-xl backdrop-blur lg:max-w-[95%] lg:flex-wrap lg:overflow-visible">
+      <span className="shrink-0 self-center pl-1 pr-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Tipo</span>
       {WALL_KINDS.map((k) => (
-        <button key={k.value} type="button" onClick={() => setWallKind(k.value)} className={chip(wallKind === k.value)}>
+        <button key={k.value} type="button" onClick={() => setWallKind(k.value)} className={`${chip(wallKind === k.value)} shrink-0`}>
           {k.label}
         </button>
       ))}
-      <span className="self-center px-2 text-[11px] text-neutral-500">← clic para empezar a trazar</span>
+      <span className="hidden shrink-0 self-center px-2 text-[11px] text-neutral-500 lg:inline">← clic para empezar a trazar</span>
     </div>
   );
 }

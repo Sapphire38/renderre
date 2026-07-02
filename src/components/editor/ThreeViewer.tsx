@@ -73,7 +73,7 @@ export default function ThreeViewer() {
   }, [present]);
 
   return (
-    <div ref={wrapRef} className="relative h-screen w-screen bg-[#0b0e14]">
+    <div ref={wrapRef} className="relative h-dvh w-full bg-[#0b0e14]">
       <Scene3D chrome={!present} persistCameraKey={CAM_KEY} onOpenTab={undefined} />
 
       {!ready && (
