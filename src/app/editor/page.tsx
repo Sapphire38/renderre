@@ -7,7 +7,7 @@ const EditorShell = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex h-screen w-screen items-center justify-center bg-neutral-950 text-neutral-400">
+      <div className="flex h-dvh w-full items-center justify-center bg-neutral-950 text-neutral-400">
         Cargando editor…
       </div>
     ),

@@ -114,12 +114,12 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="absolute inset-0 z-10 flex flex-col bg-neutral-950">
-      <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-4 py-2.5">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold text-neutral-100">Despiece y presupuesto</span>
-          <span className="text-neutral-600">·</span>
-          <span className="text-sm text-neutral-400">{draft.name}</span>
-          <div className="ml-2 flex rounded-md border border-neutral-800 p-0.5 text-xs">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2.5 sm:px-4">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <span className="hidden text-sm font-semibold text-neutral-100 sm:inline">Despiece y presupuesto</span>
+          <span className="hidden text-neutral-600 lg:inline">·</span>
+          <span className="hidden truncate text-sm text-neutral-400 lg:inline">{draft.name}</span>
+          <div className="flex rounded-md border border-neutral-800 p-0.5 text-xs sm:ml-2">
             <button
               type="button"
               onClick={() => setTab("list")}
@@ -142,14 +142,14 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
             onClick={exportCsv}
             className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-200 hover:border-sky-500 hover:bg-neutral-800"
           >
-            ⬇ Exportar CSV
+            ⬇ <span className="sm:hidden">CSV</span><span className="hidden sm:inline">Exportar CSV</span>
           </button>
           <button
             type="button"
             onClick={onClose}
             className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500"
           >
-            Volver al diseño
+            Volver<span className="hidden sm:inline"> al diseño</span>
           </button>
         </div>
       </div>

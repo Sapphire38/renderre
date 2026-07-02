@@ -25,19 +25,19 @@ export default function SurfaceBar() {
     ].join(" ");
 
   return (
-    <div className="pointer-events-auto absolute left-1/2 top-3 z-20 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center gap-1 rounded-lg border border-neutral-800 bg-neutral-900/95 p-1.5 shadow-xl backdrop-blur">
+    <div className="no-scrollbar pointer-events-auto absolute left-1/2 top-3 z-20 flex max-w-[calc(100%-1rem)] -translate-x-1/2 flex-nowrap items-center gap-1 overflow-x-auto rounded-lg border border-neutral-800 bg-neutral-900/95 p-1.5 shadow-xl backdrop-blur lg:max-w-[95%] lg:flex-wrap lg:overflow-visible">
       {SURFACE_SHAPES.map((sh) => (
-        <button key={sh.value} type="button" onClick={() => setShape(sh.value)} className={chip(shape === sh.value)}>
+        <button key={sh.value} type="button" onClick={() => setShape(sh.value)} className={`${chip(shape === sh.value)} shrink-0`}>
           {sh.label}
         </button>
       ))}
-      <div className="mx-1 h-7 w-px self-center bg-neutral-700" />
-      <span className="self-center px-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Material</span>
-      <button type="button" onClick={() => setSurfaceMaterial(null)} title="Sin material (color por defecto)" className={mchip(!surfaceMaterialId)}>
+      <div className="mx-1 h-7 w-px shrink-0 self-center bg-neutral-700" />
+      <span className="shrink-0 self-center px-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Material</span>
+      <button type="button" onClick={() => setSurfaceMaterial(null)} title="Sin material (color por defecto)" className={`${mchip(!surfaceMaterialId)} shrink-0`}>
         <span className="text-[10px] text-neutral-400">—</span>
       </button>
       {materials.map((m) => (
-        <button key={m.id} type="button" onClick={() => setSurfaceMaterial(m.id)} title={m.name} className={mchip(surfaceMaterialId === m.id)}>
+        <button key={m.id} type="button" onClick={() => setSurfaceMaterial(m.id)} title={m.name} className={`${mchip(surfaceMaterialId === m.id)} shrink-0`}>
           {m.albedo ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={m.albedo} alt={m.name} className="h-full w-full object-cover" />
@@ -46,7 +46,7 @@ export default function SurfaceBar() {
           )}
         </button>
       ))}
-      <span className="self-center px-2 text-[11px] text-neutral-500">
+      <span className="hidden shrink-0 self-center px-2 text-[11px] text-neutral-500 lg:inline">
         {shape === "polygon"
           ? "clic para agregar vértices · doble clic (o clic en el primero) para cerrar · doble clic en una arista/vértice para agregar/quitar"
           : "← arrastrá un rectángulo en el plano"}

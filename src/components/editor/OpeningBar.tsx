@@ -22,20 +22,20 @@ export default function OpeningBar() {
     ].join(" ");
 
   return (
-    <div className="pointer-events-auto absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-neutral-800 bg-neutral-900/95 p-1.5 shadow-xl backdrop-blur">
+    <div className="no-scrollbar pointer-events-auto absolute left-1/2 top-3 z-20 flex max-w-[calc(100%-1rem)] -translate-x-1/2 flex-nowrap items-center gap-1 overflow-x-auto rounded-lg border border-neutral-800 bg-neutral-900/95 p-1.5 shadow-xl backdrop-blur lg:max-w-[95%] lg:flex-wrap lg:overflow-visible">
       {(["door", "window"] as OpeningKind[]).map((k) => (
-        <button key={k} type="button" onClick={() => setKind(k)} className={chip(kind === k)}>
+        <button key={k} type="button" onClick={() => setKind(k)} className={`${chip(kind === k)} shrink-0`}>
           {LABELS[k]}
         </button>
       ))}
-      <div className="mx-1 h-7 w-px self-center bg-neutral-700" />
-      <span className="self-center px-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Estilo</span>
+      <div className="mx-1 h-7 w-px shrink-0 self-center bg-neutral-700" />
+      <span className="shrink-0 self-center px-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Estilo</span>
       {OPENING_STYLES[kind].map((st) => (
-        <button key={st.value} type="button" onClick={() => setStyle(st.value)} className={chip(style === st.value)}>
+        <button key={st.value} type="button" onClick={() => setStyle(st.value)} className={`${chip(style === st.value)} shrink-0`}>
           {st.label}
         </button>
       ))}
-      <span className="self-center px-2 text-[11px] text-neutral-500">← hacé clic sobre un muro</span>
+      <span className="hidden shrink-0 self-center px-2 text-[11px] text-neutral-500 lg:inline">← hacé clic sobre un muro</span>
     </div>
   );
 }

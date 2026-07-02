@@ -43,6 +43,14 @@ select {
   }
 }
 
+/* Tiras de herramientas que hacen scroll horizontal en móvil sin barra visible. */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
 /* Scrollbars discretos para los paneles */
 *::-webkit-scrollbar {
   width: 10px;

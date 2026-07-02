@@ -103,7 +103,7 @@ export default function FurnitureCatalog() {
   const divider = <div className="mx-1 h-9 w-px self-center bg-neutral-700" />;
 
   return (
-    <div className="pointer-events-auto absolute left-1/2 top-3 z-20 flex max-h-[45vh] max-w-[95%] -translate-x-1/2 flex-wrap items-center gap-1.5 overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-900/95 p-1.5 shadow-xl backdrop-blur lg:max-h-none lg:overflow-visible">
+    <div className="no-scrollbar pointer-events-auto absolute left-1/2 top-3 z-20 flex max-w-[calc(100%-1rem)] -translate-x-1/2 flex-nowrap items-center gap-1.5 overflow-x-auto rounded-lg border border-neutral-800 bg-neutral-900/95 p-1.5 shadow-xl backdrop-blur [&>*]:shrink-0 lg:max-w-[95%] lg:flex-wrap lg:overflow-visible">
       <span className="self-center pl-1 pr-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
         MDF
       </span>
