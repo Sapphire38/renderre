@@ -20,6 +20,8 @@ export default function FurnitureWorkbench() {
   const canUndo = useEditor((s) => s.draftPast.length > 0);
   const canRedo = useEditor((s) => s.draftFuture.length > 0);
   const [showCutList, setShowCutList] = useState(false);
+  // En móvil se muestra un solo panel a la vez (pestañas al pie). En lg+ conviven los tres.
+  const [mobileTab, setMobileTab] = useState<"controls" | "elevation" | "3d">("elevation");
 
   // Atajos de teclado del taller (solo activos mientras está abierto).
   useEffect(() => {
@@ -140,21 +142,64 @@ export default function FurnitureWorkbench() {
         </div>
       </header>
 
-      <div className="relative flex min-h-0 flex-1 overflow-x-auto lg:overflow-x-visible">
+      <div className="relative flex min-h-0 flex-1">
         {showCutList && <WorkbenchCutList onClose={() => setShowCutList(false)} />}
-        <div className="w-[280px] shrink-0 overflow-y-auto border-r border-neutral-800 sm:w-[300px]">
+        <div
+          className={[
+            mobileTab === "controls" ? "block" : "hidden",
+            "w-full shrink-0 overflow-y-auto border-r border-neutral-800",
+            "lg:block lg:w-[300px]",
+          ].join(" ")}
+        >
           <WorkbenchControls />
         </div>
-        <div className="relative w-[88vw] shrink-0 border-r border-neutral-800 lg:w-auto lg:min-w-0 lg:flex-1">
+        <div
+          className={[
+            mobileTab === "elevation" ? "block" : "hidden",
+            "relative w-full shrink-0 border-r border-neutral-800",
+            "lg:block lg:w-auto lg:min-w-0 lg:flex-1",
+          ].join(" ")}
+        >
           <FrontElevationEditor />
         </div>
-        <div className="relative w-[88vw] shrink-0 lg:w-[38%] lg:min-w-[280px]">
+        <div
+          className={[
+            mobileTab === "3d" ? "block" : "hidden",
+            "relative w-full shrink-0",
+            "lg:block lg:w-[38%] lg:min-w-[280px]",
+          ].join(" ")}
+        >
           <WorkbenchPreview3D />
           <div className="pointer-events-none absolute left-2 top-2 rounded bg-black/40 px-2 py-1 text-[11px] text-neutral-400">
             Vista 3D · arrastrá para orbitar
           </div>
         </div>
       </div>
+
+      {/* Pestañas de panel (solo móvil): un panel a la vez. */}
+      <nav
+        className="flex shrink-0 items-stretch border-t border-neutral-800 bg-neutral-900 lg:hidden"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
+        {([
+          { id: "controls", label: "Ajustes", icon: "⚙" },
+          { id: "elevation", label: "Alzado", icon: "▤" },
+          { id: "3d", label: "3D", icon: "◫" },
+        ] as const).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setMobileTab(t.id)}
+            className={[
+              "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium",
+              mobileTab === t.id ? "bg-sky-500/15 text-sky-300" : "text-neutral-400 active:bg-neutral-800",
+            ].join(" ")}
+          >
+            <span className="text-base leading-none">{t.icon}</span>
+            {t.label}
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }
