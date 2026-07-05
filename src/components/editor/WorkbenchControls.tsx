@@ -124,6 +124,37 @@ function CompProps({ c }: { c: FurnitureComponent }) {
       <Num label="Alto" value={cm(c.h)} unit="cm" min={1} step={0.1} onChange={(v) => set({ h: Math.max(0.02, v / 100) })} />
 
       {(() => {
+        // El espesor propio aplica a piezas planas de MDF (no al barral ni a placas con forma 3D).
+        const shaped = c.kind === "board" && !!c.shape && c.shape !== "box";
+        if (c.kind === "rod" || shaped) return null;
+        return (
+          <>
+            <Num
+              label="Espesor"
+              value={mm(c.thickness ?? draftPanel)}
+              unit="mm"
+              min={3}
+              max={50}
+              step={0.1}
+              onChange={(v) => set({ thickness: clamp(v / 1000, 0.003, 0.05) })}
+            />
+            {c.thickness != null && (
+              <div className="-mt-1 flex justify-end pb-1">
+                <button
+                  type="button"
+                  onClick={() => setStep({ thickness: undefined })}
+                  title="Que la pieza siga el espesor MDF del mueble"
+                  className="text-[11px] text-neutral-500 hover:text-neutral-300"
+                >
+                  ↺ usar espesor del mueble
+                </button>
+              </div>
+            )}
+          </>
+        );
+      })()}
+
+      {(() => {
         const orient = c.orient ?? "front";
         const shaped = c.kind === "board" && !!c.shape && c.shape !== "box";
         const isFrontBoard = c.kind === "board" && orient === "front" && !shaped;
@@ -208,7 +239,41 @@ function CompProps({ c }: { c: FurnitureComponent }) {
         <Num label="Cajones" value={c.count ?? 1} unit="" min={1} max={8} onChange={(v) => set({ count: clamp(Math.round(v), 1, 8) })} />
       )}
       {c.kind === "doorSliding" && (
-        <Num label="Hojas" value={c.count ?? 2} unit="" min={2} max={4} onChange={(v) => set({ count: clamp(Math.round(v), 2, 4) })} />
+        <>
+          <Num label="Hojas" value={c.count ?? 2} unit="" min={2} max={4} onChange={(v) => set({ count: clamp(Math.round(v), 2, 4) })} />
+          {(() => {
+            // Solape entre hojas. Por defecto: 12% del segmento (tope 4 cm), para que
+            // no quede luz vertical al cerrar. Se puede sobreescribir por hoja.
+            const nn = c.count ?? 2;
+            const segM = c.w / nn;
+            const autoM = Math.min(0.04, segM * 0.12);
+            return (
+              <>
+                <Num
+                  label="Solape"
+                  value={cm(c.overlap ?? autoM)}
+                  unit="cm"
+                  min={0}
+                  max={cm(segM)}
+                  step={0.1}
+                  onChange={(v) => set({ overlap: clamp(v / 100, 0, segM) })}
+                />
+                {c.overlap != null && (
+                  <div className="-mt-1 flex justify-end pb-1">
+                    <button
+                      type="button"
+                      onClick={() => setStep({ overlap: undefined })}
+                      title="Volver al solape automático"
+                      className="text-[11px] text-neutral-500 hover:text-neutral-300"
+                    >
+                      ↺ solape automático
+                    </button>
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </>
       )}
       {c.kind === "doorHinged" && (
         <label className="flex items-center justify-between gap-2 py-1 text-sm">

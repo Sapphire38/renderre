@@ -242,11 +242,16 @@ export default function FrontElevationEditor() {
       // tamaño
       hDim(ctx, cL, cR, cTop - 14, fmtCm(sel.w));
       vDim(ctx, cR + 14, cBot, cTop, fmtCm(sel.h));
-      // distancia a los bordes del mueble (frame)
-      if (sel.x > 0.001) hDim(ctx, x0, cL, cBot + 12, fmtCm(sel.x));
-      if (sel.y > 0.001) vDim(ctx, cL - 12, y0, cBot, fmtCm(sel.y));
+      // Caras interiores de la carcasa: si hay caja, descuenta el espesor de placa
+      // (si carcass === false el marco es solo guía → referencia = borde exterior).
+      const tt = draft.carcass === false ? 0 : draft.panel || 0.018;
+      const inL = tt;
+      const inR = t.W - tt;
+      const inB = tt;
+      const inT = t.H - tt;
 
-      // distancia a los componentes vecinos (gap) en cada dirección
+      // Cotas de luz libre: en cada dirección, al vecino más cercano (verde) o,
+      // si no hay ninguno, a la cara interior de la carcasa (azul).
       const others = comps.filter((c) => c.id !== sel.id);
       const ovY = (c: FurnitureComponent) => c.y < sel.y + sel.h && c.y + c.h > sel.y;
       const ovX = (c: FurnitureComponent) => c.x < sel.x + sel.w && c.x + c.w > sel.x;
@@ -256,6 +261,8 @@ export default function FrontElevationEditor() {
         const n = rights.reduce((a, b) => (b.x < a.x ? b : a));
         const my = (Math.max(sel.y, n.y) + Math.min(sel.y + sel.h, n.y + n.h)) / 2;
         hDim(ctx, cR, sx(n.x, t), sy(my, t), fmtCm(n.x - (sel.x + sel.w)), GAP_LINE, GAP_LABEL);
+      } else if (sel.x + sel.w < inR - 1e-3) {
+        hDim(ctx, cR, sx(inR, t), sy(sel.y + sel.h / 2, t), fmtCm(inR - (sel.x + sel.w)));
       }
       // izquierda
       const lefts = others.filter((c) => ovY(c) && c.x + c.w <= sel.x + 1e-4);
@@ -263,6 +270,8 @@ export default function FrontElevationEditor() {
         const n = lefts.reduce((a, b) => (b.x + b.w > a.x + a.w ? b : a));
         const my = (Math.max(sel.y, n.y) + Math.min(sel.y + sel.h, n.y + n.h)) / 2;
         hDim(ctx, sx(n.x + n.w, t), cL, sy(my, t), fmtCm(sel.x - (n.x + n.w)), GAP_LINE, GAP_LABEL);
+      } else if (sel.x > inL + 1e-3) {
+        hDim(ctx, sx(inL, t), cL, sy(sel.y + sel.h / 2, t), fmtCm(sel.x - inL));
       }
       // arriba
       const tops = others.filter((c) => ovX(c) && c.y >= sel.y + sel.h - 1e-4);
@@ -270,6 +279,8 @@ export default function FrontElevationEditor() {
         const n = tops.reduce((a, b) => (b.y < a.y ? b : a));
         const mx = (Math.max(sel.x, n.x) + Math.min(sel.x + sel.w, n.x + n.w)) / 2;
         vDim(ctx, sx(mx, t), sy(n.y, t), cTop, fmtCm(n.y - (sel.y + sel.h)), GAP_LINE, GAP_LABEL);
+      } else if (sel.y + sel.h < inT - 1e-3) {
+        vDim(ctx, sx(sel.x + sel.w / 2, t), sy(inT, t), cTop, fmtCm(inT - (sel.y + sel.h)));
       }
       // abajo
       const bottoms = others.filter((c) => ovX(c) && c.y + c.h <= sel.y + 1e-4);
@@ -277,6 +288,8 @@ export default function FrontElevationEditor() {
         const n = bottoms.reduce((a, b) => (b.y + b.h > a.y + a.h ? b : a));
         const mx = (Math.max(sel.x, n.x) + Math.min(sel.x + sel.w, n.x + n.w)) / 2;
         vDim(ctx, sx(mx, t), cBot, sy(n.y + n.h, t), fmtCm(sel.y - (n.y + n.h)), GAP_LINE, GAP_LABEL);
+      } else if (sel.y > inB + 1e-3) {
+        vDim(ctx, sx(sel.x + sel.w / 2, t), cBot, sy(inB, t), fmtCm(sel.y - inB));
       }
     }
   };

@@ -294,10 +294,14 @@ export type FurnitureComponent = {
   w: number;
   h: number;
   count?: number; // cajones apilados / hojas corredizas
+  /** Corrediza: solape entre hojas (m). Si falta, se calcula automático (12% del segmento, tope 4 cm). */
+  overlap?: number;
   hinge?: "left" | "right"; // puerta batiente
   orient?: "front" | "horizontal" | "vertical"; // placa libre
   /** Placa: forma 3D. "box" (default) o una primitiva (cilindro/esfera/cono/pirámide/cuña). */
   shape?: "box" | "cylinder" | "sphere" | "cone" | "pyramid" | "wedge";
+  /** Espesor propio de la placa de este componente (m). Si falta, usa el del mueble (draft.panel). */
+  thickness?: number;
   /** Profundidad propia del componente en el eje Z (m). Si falta, ocupa casi toda la del mueble. */
   depth?: number;
   /** Retiro en profundidad: distancia desde el frente del mueble (m). Si falta, va centrado. */

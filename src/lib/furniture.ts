@@ -454,12 +454,14 @@ export function buildCustomPanels(f: Furniture): Panel[] {
     const open = c.open ?? 0;
     const col = c.color; // color propio del componente (si falta, usa el del mueble)
     const mat = c.materialId; // material propio del componente (textura/melamina)
+    // Espesor propio de la pieza (m). Si no se definió, usa el del mueble.
+    const ct = c.thickness != null ? cl(c.thickness, 0.003, Math.min(W, D, H) / 2) : t;
     if (c.kind === "shelf") {
       const d = depthZ(c);
-      panels.push({ pos: [cx(c.x, c.w), base + c.y, d.zc], size: [c.w, t, d.zs], color: col, materialId: mat, role: "Estante", edges: { front: true } });
+      panels.push({ pos: [cx(c.x, c.w), base + c.y, d.zc], size: [c.w, ct, d.zs], color: col, materialId: mat, role: "Estante", edges: { front: true } });
     } else if (c.kind === "divider") {
       const d = depthZ(c);
-      panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), d.zc], size: [Math.max(c.w, t), c.h, d.zs], color: col, materialId: mat, role: "División", edges: { front: true } });
+      panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), d.zc], size: [Math.max(c.w, ct), c.h, d.zs], color: col, materialId: mat, role: "División", edges: { front: true } });
     } else if (c.kind === "rod") {
       panels.push({ pos: [cx(c.x, c.w), base + c.y, 0], size: [c.w, 0.03, 0.03], cylinder: true, color: col ?? "#9aa3ad" });
     } else if (c.kind === "board") {
@@ -474,33 +476,33 @@ export function buildCustomPanels(f: Furniture): Panel[] {
         if (shp === "cylinder") panels.push({ pos, size, cylinder: true, cylAxis: "y", color: col, materialId: mat });
         else panels.push({ pos, size, shape: shp, color: col, materialId: mat });
       } else if (o === "front") {
-        const inset = cl(c.depthInset ?? 0, 0, Math.max(0, D - t));
-        panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), frontZ + inset], size: [c.w, c.h, t], color: col, materialId: mat, role: "Placa", edges: { front: true, back: true, left: true, right: true } });
+        const inset = cl(c.depthInset ?? 0, 0, Math.max(0, D - ct));
+        panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), frontZ + inset], size: [c.w, c.h, ct], color: col, materialId: mat, role: "Placa", edges: { front: true, back: true, left: true, right: true } });
       } else if (o === "horizontal") {
         const d = depthZ(c);
-        panels.push({ pos: [cx(c.x, c.w), base + c.y + c.h / 2, d.zc], size: [c.w, t, d.zs], color: col, materialId: mat, role: "Placa", edges: { front: true } });
+        panels.push({ pos: [cx(c.x, c.w), base + c.y + c.h / 2, d.zc], size: [c.w, ct, d.zs], color: col, materialId: mat, role: "Placa", edges: { front: true } });
       } else {
         const d = depthZ(c);
-        panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), d.zc], size: [t, c.h, d.zs], color: col, materialId: mat, role: "Placa", edges: { front: true } });
+        panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), d.zc], size: [ct, c.h, d.zs], color: col, materialId: mat, role: "Placa", edges: { front: true } });
       }
     } else if (c.kind === "drawer") {
       const n = Math.max(1, c.count ?? 1);
       const each = c.h / n;
       const pull = open * Math.min(D * 0.7, 0.4);
-      const boxD = cl(c.depth ?? D - 2 * t - 0.02, 0.05, D - t);
+      const boxD = cl(c.depth ?? D - 2 * ct - 0.02, 0.05, D - ct);
       for (let i = 0; i < n; i++) {
         const dy = c.y + i * each;
         const fY = cyTop(dy, each);
         const fz = frontZ - pull;
         const bxc = cx(c.x, c.w);
-        const boxZc = fz + t / 2 + boxD / 2;
+        const boxZc = fz + ct / 2 + boxD / 2;
         const sideH = Math.max(each * 0.55, 0.05);
-        const boxYc = fY - each / 2 + sideH / 2 + t;
-        panels.push({ pos: [bxc, fY, fz], size: [c.w - GAP, each - GAP, t], door: true, color: col, materialId: mat, role: "Frente cajón", edges: { front: true, back: true, left: true, right: true } }); // frente
-        panels.push({ pos: [bxc, fY - each / 2 + t, boxZc], size: [c.w - 2 * t, t, boxD], role: "Piso cajón" }); // piso
-        panels.push({ pos: [bxc, boxYc, boxZc + boxD / 2 - t / 2], size: [c.w - 2 * t, sideH, t], role: "Contrafrente cajón" }); // fondo cajón
-        panels.push({ pos: [bxc - c.w / 2 + t / 2, boxYc, boxZc], size: [t, sideH, boxD], role: "Lateral cajón" }); // lado izq
-        panels.push({ pos: [bxc + c.w / 2 - t / 2, boxYc, boxZc], size: [t, sideH, boxD], role: "Lateral cajón" }); // lado der
+        const boxYc = fY - each / 2 + sideH / 2 + ct;
+        panels.push({ pos: [bxc, fY, fz], size: [c.w - GAP, each - GAP, ct], door: true, color: col, materialId: mat, role: "Frente cajón", edges: { front: true, back: true, left: true, right: true } }); // frente
+        panels.push({ pos: [bxc, fY - each / 2 + ct, boxZc], size: [c.w - 2 * ct, ct, boxD], role: "Piso cajón" }); // piso
+        panels.push({ pos: [bxc, boxYc, boxZc + boxD / 2 - ct / 2], size: [c.w - 2 * ct, sideH, ct], role: "Contrafrente cajón" }); // fondo cajón
+        panels.push({ pos: [bxc - c.w / 2 + ct / 2, boxYc, boxZc], size: [ct, sideH, boxD], role: "Lateral cajón" }); // lado izq
+        panels.push({ pos: [bxc + c.w / 2 - ct / 2, boxYc, boxZc], size: [ct, sideH, boxD], role: "Lateral cajón" }); // lado der
       }
     } else if (c.kind === "doorHinged") {
       const hingeLeft = (c.hinge ?? "left") === "left";
@@ -508,7 +510,7 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       const rot = (hingeLeft ? 1 : -1) * open * Math.PI * 0.62;
       panels.push({
         pos: [cx(c.x, c.w), cyTop(c.y, c.h), frontZ],
-        size: [c.w - GAP, c.h - GAP, t],
+        size: [c.w - GAP, c.h - GAP, ct],
         door: true,
         color: col,
         materialId: mat,
@@ -522,15 +524,15 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       // Al abrir, cada hoja se corre hacia la izquierda y se apilan sobre la hoja 0.
       const n = Math.max(2, c.count ?? 2);
       const seg = c.w / n;
-      const overlap = Math.min(0.04, seg * 0.12);
+      const overlap = c.overlap != null ? cl(c.overlap, 0, seg) : Math.min(0.04, seg * 0.12);
       const leafW = seg + overlap;
-      const trackGap = t + 0.012;
+      const trackGap = ct + 0.012;
       for (let i = 0; i < n; i++) {
         const track = i % 2;
         const z = frontZ - track * trackGap;
         const closedX = -W / 2 + c.x + i * seg + seg / 2;
         const x = closedX - open * i * seg;
-        panels.push({ pos: [x, cyTop(c.y, c.h), z], size: [leafW - GAP, c.h - GAP, t], door: true, color: col, materialId: mat, role: "Puerta corrediza", edges: { front: true, back: true, left: true, right: true } });
+        panels.push({ pos: [x, cyTop(c.y, c.h), z], size: [leafW - GAP, c.h - GAP, ct], door: true, color: col, materialId: mat, role: "Puerta corrediza", edges: { front: true, back: true, left: true, right: true } });
       }
     }
   }
