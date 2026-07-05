@@ -13,3 +13,9 @@ approval_mode = "approve"
 
 [mcp_servers.renderre.tools.renderre_fit_view]
 approval_mode = "approve"
+
+[mcp_servers.renderre.tools.renderre_clear_selection]
+approval_mode = "approve"
+
+[mcp_servers.renderre.tools.renderre_apply_scene]
+approval_mode = "approve"

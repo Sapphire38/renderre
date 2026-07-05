@@ -10,6 +10,9 @@ import { TrashIcon, CopyIcon } from "./icons";
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 // Captura un snapshot para deshacer antes de empezar a editar un campo.
 const beginEdit = () => useEditor.getState().pushDraftHistory();
+// Conversión metros → unidad de display con 1 decimal (precisión de 1 mm).
+const cm = (m: number) => Math.round(m * 1000) / 10;
+const mm = (m: number) => Math.round(m * 10000) / 10;
 
 function Num({
   label,
@@ -28,21 +31,28 @@ function Num({
   step?: number;
   onChange: (v: number) => void;
 }) {
+  // Buffer de texto local: mientras se edita mostramos lo tipeado tal cual
+  // (permite escribir decimales como "12.5" sin que se reformatee en cada tecla).
+  // `null` = mostrar el valor externo. Se limpia al salir del campo.
+  const [text, setText] = useState<string | null>(null);
+  const display = text ?? (Number.isFinite(value) ? String(value) : "");
   return (
     <label className="flex items-center justify-between gap-2 py-1 text-sm">
       <span className="text-neutral-400">{label}</span>
       <span className="flex items-center gap-1.5">
         <input
           type="number"
-          value={Number.isFinite(value) ? value : ""}
+          value={display}
           min={min}
           max={max}
           step={step}
           onFocus={beginEdit}
           onChange={(e) => {
+            setText(e.target.value);
             const v = parseFloat(e.target.value);
             if (!Number.isNaN(v)) onChange(v);
           }}
+          onBlur={() => setText(null)}
           className="w-20 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-right text-neutral-100 outline-none focus:border-sky-600"
         />
         <span className="w-7 text-xs text-neutral-500">{unit}</span>
@@ -108,10 +118,10 @@ function CompProps({ c }: { c: FurnitureComponent }) {
       <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
         Componente seleccionado
       </h3>
-      <Num label="X (desde izq.)" value={Math.round(c.x * 100)} unit="cm" min={0} onChange={(v) => set({ x: Math.max(0, v / 100) })} />
-      <Num label="Y (desde abajo)" value={Math.round(c.y * 100)} unit="cm" min={0} onChange={(v) => set({ y: Math.max(0, v / 100) })} />
-      <Num label="Ancho" value={Math.round(c.w * 100)} unit="cm" min={1} onChange={(v) => set({ w: Math.max(0.02, v / 100) })} />
-      <Num label="Alto" value={Math.round(c.h * 100)} unit="cm" min={1} onChange={(v) => set({ h: Math.max(0.02, v / 100) })} />
+      <Num label="X (desde izq.)" value={cm(c.x)} unit="cm" min={0} step={0.1} onChange={(v) => set({ x: Math.max(0, v / 100) })} />
+      <Num label="Y (desde abajo)" value={cm(c.y)} unit="cm" min={0} step={0.1} onChange={(v) => set({ y: Math.max(0, v / 100) })} />
+      <Num label="Ancho" value={cm(c.w)} unit="cm" min={1} step={0.1} onChange={(v) => set({ w: Math.max(0.02, v / 100) })} />
+      <Num label="Alto" value={cm(c.h)} unit="cm" min={1} step={0.1} onChange={(v) => set({ h: Math.max(0.02, v / 100) })} />
 
       {(() => {
         const orient = c.orient ?? "front";
@@ -129,20 +139,22 @@ function CompProps({ c }: { c: FurnitureComponent }) {
             {showDepth && (
               <Num
                 label="Profundidad"
-                value={Math.round((c.depth ?? defaultDepth) * 100)}
+                value={cm(c.depth ?? defaultDepth)}
                 unit="cm"
                 min={2}
-                max={Math.round(draftDepth * 100)}
+                max={cm(draftDepth)}
+                step={0.1}
                 onChange={(v) => set({ depth: clamp(v / 100, 0.02, draftDepth) })}
               />
             )}
             {showInset && (
               <Num
                 label={isFrontBoard ? "Retiro del frente" : "Profundidad desde frente"}
-                value={Math.round((c.depthInset ?? 0) * 100)}
+                value={cm(c.depthInset ?? 0)}
                 unit="cm"
                 min={0}
-                max={Math.round(draftDepth * 100)}
+                max={cm(draftDepth)}
+                step={0.1}
                 onChange={(v) => set({ depthInset: clamp(v / 100, 0, draftDepth) })}
               />
             )}
@@ -393,10 +405,10 @@ export default function WorkbenchControls() {
             className="w-44 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-100 outline-none focus:border-sky-600"
           />
         </label>
-        <Num label="Ancho" value={Math.round(draft.width * 100)} unit="cm" min={10} max={400} onChange={(v) => updateDraft({ width: clamp(v / 100, 0.1, 4) })} />
-        <Num label="Alto" value={Math.round(draft.height * 100)} unit="cm" min={10} max={300} onChange={(v) => updateDraft({ height: clamp(v / 100, 0.1, 3) })} />
-        <Num label="Profundidad" value={Math.round(draft.depth * 100)} unit="cm" min={5} max={120} onChange={(v) => updateDraft({ depth: clamp(v / 100, 0.05, 1.2) })} />
-        <Num label="Espesor MDF" value={Math.round(draft.panel * 1000)} unit="mm" min={3} max={50} onChange={(v) => updateDraft({ panel: clamp(v / 1000, 0.003, 0.05) })} />
+        <Num label="Ancho" value={cm(draft.width)} unit="cm" min={10} max={400} step={0.1} onChange={(v) => updateDraft({ width: clamp(v / 100, 0.1, 4) })} />
+        <Num label="Alto" value={cm(draft.height)} unit="cm" min={10} max={300} step={0.1} onChange={(v) => updateDraft({ height: clamp(v / 100, 0.1, 3) })} />
+        <Num label="Profundidad" value={cm(draft.depth)} unit="cm" min={5} max={120} step={0.1} onChange={(v) => updateDraft({ depth: clamp(v / 100, 0.05, 1.2) })} />
+        <Num label="Espesor MDF" value={mm(draft.panel)} unit="mm" min={3} max={50} step={0.1} onChange={(v) => updateDraft({ panel: clamp(v / 1000, 0.003, 0.05) })} />
         <div className="flex items-center justify-between gap-2 py-1">
           <span className="text-neutral-400" title="Dibujar la caja (laterales, piso, techo). Apagalo para formas libres como una escalera.">Carcasa (caja)</span>
           <input type="checkbox" checked={draft.carcass !== false} onFocus={beginEdit} onChange={(e) => updateDraft({ carcass: e.target.checked })} className="h-4 w-4 accent-sky-500" />
