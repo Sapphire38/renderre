@@ -507,8 +507,11 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       const d = depthZ(c);
       panels.push({ pos: [cx(c.x, c.w), base + c.y, d.zc], size: [c.w, ct, d.zs], color: col, materialId: mat, role: "Estante", edges: { front: true } });
     } else if (c.kind === "divider") {
+      // El espesor FÍSICO de la división es su campo "Espesor" (ct), no el ancho
+      // dibujado en el alzado (que tiene mínimo 2 cm y es solo el manejador visual):
+      // si no, el despiece listaba divisiones de 20 mm con placa de 18.
       const d = depthZ(c);
-      panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), d.zc], size: [Math.max(c.w, ct), c.h, d.zs], color: col, materialId: mat, role: "División", edges: { front: true } });
+      panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), d.zc], size: [ct, c.h, d.zs], color: col, materialId: mat, role: "División", edges: { front: true } });
     } else if (c.kind === "cleat") {
       // Listón francés: tira pegada a la cara trasera del mueble (dentro del retiro del
       // fondo si lo hay). Se corta ripado a 45° — el ángulo va como nota en el despiece.
