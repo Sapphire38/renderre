@@ -3,21 +3,19 @@
 import { useEditor } from "@/lib/store";
 
 /**
- * Switch de ambientes tipo pastilla: Taller (diseño de un mueble) · Mis muebles
- * (galería/listado con vista previa) · Plano (planta + render del proyecto).
- * El ambiente activo se resalta con el acento de la app.
+ * Switch de ambientes tipo pastilla: Taller (diseño de muebles, con su galería
+ * adentro) · Plano (planta + render del proyecto). El activo se resalta con el
+ * acento de la app.
  */
 export default function EnvSwitch() {
   const workbenchOpen = useEditor((s) => s.workbenchOpen);
   const libraryOpen = useEditor((s) => s.libraryOpen);
   const setView = useEditor((s) => s.setView);
-  const count = useEditor((s) => s.customLibrary.length);
 
-  const active: "taller" | "library" | "plan" = workbenchOpen ? "taller" : libraryOpen ? "library" : "plan";
+  const inTaller = workbenchOpen || libraryOpen;
   const options = [
-    { id: "taller" as const, label: "Taller" },
-    { id: "library" as const, label: count > 0 ? `Muebles · ${count}` : "Muebles" },
-    { id: "plan" as const, label: "Plano" },
+    { id: "taller" as const, label: "Taller", active: inTaller },
+    { id: "plan" as const, label: "Plano", active: !inTaller },
   ];
 
   return (
@@ -29,12 +27,44 @@ export default function EnvSwitch() {
           onClick={() => setView(o.id)}
           className={[
             "whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide transition-colors sm:px-3",
-            active === o.id
-              ? "bg-sky-400 text-neutral-950"
-              : "text-neutral-400 hover:text-neutral-100",
+            o.active ? "bg-sky-400 text-neutral-950" : "text-neutral-400 hover:text-neutral-100",
           ].join(" ")}
         >
           {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Sub-pestañas DENTRO del taller: Diseño (mueble en edición) · Mis muebles
+ * (galería con vista previa). Estilo secundario para no competir con el
+ * switch de ambientes.
+ */
+export function TallerTabs() {
+  const libraryOpen = useEditor((s) => s.libraryOpen);
+  const setView = useEditor((s) => s.setView);
+  const count = useEditor((s) => s.customLibrary.length);
+
+  const tabs = [
+    { id: "taller" as const, label: "Diseño", active: !libraryOpen },
+    { id: "library" as const, label: count > 0 ? `Mis muebles · ${count}` : "Mis muebles", active: libraryOpen },
+  ];
+
+  return (
+    <div className="flex shrink-0 items-center rounded-md border border-neutral-800 bg-neutral-900 p-0.5 text-xs">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          onClick={() => setView(t.id)}
+          className={[
+            "whitespace-nowrap rounded px-2.5 py-1 transition-colors",
+            t.active ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/40" : "text-neutral-400 hover:text-neutral-100",
+          ].join(" ")}
+        >
+          {t.label}
         </button>
       ))}
     </div>

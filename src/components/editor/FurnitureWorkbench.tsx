@@ -6,7 +6,7 @@ import FrontElevationEditor from "./FrontElevationEditor";
 import WorkbenchControls from "./WorkbenchControls";
 import WorkbenchPreview3D from "./WorkbenchPreview3D";
 import WorkbenchCutList from "./WorkbenchCutList";
-import EnvSwitch from "./EnvSwitch";
+import EnvSwitch, { TallerTabs } from "./EnvSwitch";
 import { CloseIcon, CabinetIcon, UndoIcon, RedoIcon, RulerIcon } from "./icons";
 import { isTypingTarget } from "@/lib/dom";
 
@@ -101,8 +101,8 @@ export default function FurnitureWorkbench() {
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <CabinetIcon width={18} height={18} className="hidden shrink-0 text-sky-400 sm:block" />
           <EnvSwitch />
-          <span className="hidden text-neutral-600 md:inline">·</span>
-          <span className="hidden truncate text-sm text-neutral-400 md:inline">{draft.name}</span>
+          <TallerTabs />
+          <span className="hidden truncate text-sm text-neutral-400 xl:inline">{draft.name}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <button type="button" onClick={undoDraft} disabled={!canUndo} title="Deshacer (Ctrl+Z)" className={toolBtn}>
