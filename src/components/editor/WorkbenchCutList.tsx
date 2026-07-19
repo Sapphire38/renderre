@@ -69,8 +69,8 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [allPieces, cutQty],
   );
-  const fullHw = useMemo(() => (draft ? hardwareOf(draft) : { hinges: 0, slides: 0, pulls: 0, rods: 0 }), [draft]);
-  const hw = includeHw ? fullHw : { hinges: 0, slides: 0, pulls: 0, rods: 0 };
+  const fullHw = useMemo(() => (draft ? hardwareOf(draft) : { hinges: 0, slides: 0, pulls: 0, rods: 0, pistons: 0 }), [draft]);
+  const hw = includeHw ? fullHw : { hinges: 0, slides: 0, pulls: 0, rods: 0, pistons: 0 };
   const budget = useMemo(() => budgetOf(pieces, hw, pricing), [pieces, hw, pricing]);
   const nesting = useMemo(() => nest(pieces, pricing.boardW, pricing.boardH), [pieces, pricing.boardW, pricing.boardH]);
   const partial = !includeHw || allPieces.some((p) => qtyOf(p) !== p.qty);
@@ -256,11 +256,12 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
 
             {/* Herrajes */}
             <h3 className="mb-2 mt-4 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Herrajes</h3>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
               <div className={card}><div className="text-[11px] text-neutral-500">Bisagras</div><div className="font-semibold text-neutral-100">{hw.hinges}</div></div>
               <div className={card}><div className="text-[11px] text-neutral-500">Correderas (par)</div><div className="font-semibold text-neutral-100">{hw.slides}</div></div>
               <div className={card}><div className="text-[11px] text-neutral-500">Tiradores</div><div className="font-semibold text-neutral-100">{hw.pulls}</div></div>
               <div className={card}><div className="text-[11px] text-neutral-500">Barrales</div><div className="font-semibold text-neutral-100">{hw.rods}</div></div>
+              <div className={card}><div className="text-[11px] text-neutral-500">Pistones a gas</div><div className="font-semibold text-neutral-100">{hw.pistons}</div></div>
             </div>
           </div>
 
@@ -295,6 +296,7 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
                 <PriceField label="Corredera par ($)" value={pricing.slidePrice} step={100} onChange={(v) => set({ slidePrice: Math.max(0, v) })} />
                 <PriceField label="Tirador ($)" value={pricing.pullPrice} step={50} onChange={(v) => set({ pullPrice: Math.max(0, v) })} />
                 <PriceField label="Barral ($)" value={pricing.rodPrice} step={50} onChange={(v) => set({ rodPrice: Math.max(0, v) })} />
+                <PriceField label="Pistón a gas ($)" value={pricing.pistonPrice ?? 6000} step={100} onChange={(v) => set({ pistonPrice: Math.max(0, v) })} />
                 <PriceField label="Mano de obra ($/m²)" value={pricing.laborPerM2} step={500} onChange={(v) => set({ laborPerM2: Math.max(0, v) })} />
               </div>
             )}

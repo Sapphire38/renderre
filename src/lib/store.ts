@@ -274,8 +274,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   surfaceMaterialId: undefined,
   selection: null,
   multi: [],
-  workbenchOpen: false,
-  draft: null,
+  // El Taller es la función principal del sistema: la app arranca con él abierto,
+  // listo para diseñar un mueble. Al cerrarlo se pasa al editor de planta.
+  workbenchOpen: true,
+  draft: makeCustomFurniture(),
   selectedComponentId: null,
   draftPast: [],
   draftFuture: [],

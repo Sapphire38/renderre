@@ -6,8 +6,9 @@ export type Panel = {
   pos: [number, number, number];
   size: [number, number, number];
   door?: boolean;
-  pivot?: [number, number, number]; // eje de giro (puerta batiente)
-  rotY?: number; // rotación alrededor del pivot
+  pivot?: [number, number, number]; // eje de giro (puerta batiente / tapa)
+  rotY?: number; // rotación alrededor del pivot (eje vertical, puerta batiente)
+  rotX?: number; // rotación alrededor del pivot (eje horizontal, tapa de apertura vertical)
   cylinder?: boolean; // forma cilíndrica (barral, hornalla, etc.)
   cylAxis?: "x" | "y" | "z"; // eje del cilindro (default "x"); largo = size en ese eje, radio = otro
   shape?: "sphere" | "cone" | "pyramid" | "wedge"; // primitivas no-caja
@@ -303,8 +304,9 @@ export function carcassPanels(f: Furniture): Panel[] {
     const doorH = H - 2 * t - gap * 2;
     for (let i = 0; i < f.doors; i++) {
       const dx = -W / 2 + gap + doorW / 2 + i * (doorW + gap);
+      // Frente sobrepuesto: la puerta va POR DELANTE de la carcasa (no incrustada en ella).
       panels.push({
-        pos: [dx, base + H / 2, -(D / 2 - t / 2)],
+        pos: [dx, base + H / 2, -(D / 2 + t / 2)],
         size: [doorW, doorH, t],
         door: true,
         role: "Puerta",
@@ -402,6 +404,11 @@ export function makeComponent(kind: ComponentKind, f: Furniture): FurnitureCompo
       return { id, kind, x: t, y: t, w: inW, h: inH, hinge: "left", open: 0 };
     case "doorSliding":
       return { id, kind, x: t, y: t, w: inW, h: inH, count: 2, open: 0 };
+    case "doorFlap": {
+      // Tapa vertical: por defecto ocupa la franja superior y abre hacia arriba con pistones.
+      const fh = Math.min(0.45, inH);
+      return { id, kind, x: t, y: Math.max(t, t + inH - fh), w: inW, h: fh, flapDir: "up", pistons: true, open: 0 };
+    }
     case "divider":
       return { id, kind, x: W / 2 - t / 2, y: t, w: t, h: inH };
     case "rod":
@@ -433,7 +440,10 @@ export function buildCustomPanels(f: Furniture): Panel[] {
 
   const cx = (x: number, w: number) => -W / 2 + x + w / 2;
   const cyTop = (y: number, h: number) => base + y + h / 2;
-  const frontZ = -(D / 2 - t / 2);
+  // Cara frontal de la carcasa. Los FRENTES (puertas, tapas, frentes de cajón) van
+  // sobrepuestos POR DELANTE de este plano — si quedaran dentro (z = -D/2 + t/2) se
+  // incrustan en laterales/piso/techo y la tapa cerrada se ve metida en el mueble.
+  const frontFace = -D / 2;
   const cl = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
   const fullD = D - t;
   // Profundidad (eje Z) y retiro desde el frente de un componente.
@@ -477,7 +487,7 @@ export function buildCustomPanels(f: Furniture): Panel[] {
         else panels.push({ pos, size, shape: shp, color: col, materialId: mat });
       } else if (o === "front") {
         const inset = cl(c.depthInset ?? 0, 0, Math.max(0, D - ct));
-        panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), frontZ + inset], size: [c.w, c.h, ct], color: col, materialId: mat, role: "Placa", edges: { front: true, back: true, left: true, right: true } });
+        panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), frontFace + ct / 2 + inset], size: [c.w, c.h, ct], color: col, materialId: mat, role: "Placa", edges: { front: true, back: true, left: true, right: true } });
       } else if (o === "horizontal") {
         const d = depthZ(c);
         panels.push({ pos: [cx(c.x, c.w), base + c.y + c.h / 2, d.zc], size: [c.w, ct, d.zs], color: col, materialId: mat, role: "Placa", edges: { front: true } });
@@ -493,7 +503,8 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       for (let i = 0; i < n; i++) {
         const dy = c.y + i * each;
         const fY = cyTop(dy, each);
-        const fz = frontZ - pull;
+        // frente sobrepuesto: cerrado queda apoyado contra la cara frontal del mueble
+        const fz = frontFace - ct / 2 - pull;
         const bxc = cx(c.x, c.w);
         const boxZc = fz + ct / 2 + boxD / 2;
         const sideH = Math.max(each * 0.55, 0.05);
@@ -508,20 +519,60 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       const hingeLeft = (c.hinge ?? "left") === "left";
       const pivotX = hingeLeft ? cx(c.x, c.w) - c.w / 2 : cx(c.x, c.w) + c.w / 2;
       const rot = (hingeLeft ? 1 : -1) * open * Math.PI * 0.62;
+      const fz = frontFace - ct / 2; // hoja sobrepuesta al frente
       panels.push({
-        pos: [cx(c.x, c.w), cyTop(c.y, c.h), frontZ],
+        pos: [cx(c.x, c.w), cyTop(c.y, c.h), fz],
         size: [c.w - GAP, c.h - GAP, ct],
         door: true,
         color: col,
         materialId: mat,
-        pivot: [pivotX, cyTop(c.y, c.h), frontZ],
+        pivot: [pivotX, cyTop(c.y, c.h), fz],
         rotY: rot,
         role: "Puerta",
         edges: { front: true, back: true, left: true, right: true },
       });
+    } else if (c.kind === "doorFlap") {
+      // Tapa de apertura vertical: rebate alrededor del borde superior ("up", con
+      // brazos hidráulicos) o del borde inferior ("down", tipo bar/escritorio).
+      const dir = c.flapDir ?? "up";
+      const fz = frontFace - ct / 2; // tapa sobrepuesta al frente
+      const bx = cx(c.x, c.w);
+      const up = dir === "up";
+      const pivotY = up ? base + c.y + c.h : base + c.y;
+      // "up": rota hacia afuera/arriba (~100° con pistones); "down": hasta horizontal (90°).
+      const ang = up ? open * Math.PI * 0.55 : -open * Math.PI * 0.5;
+      panels.push({
+        pos: [bx, cyTop(c.y, c.h), fz],
+        size: [c.w - GAP, c.h - GAP, ct],
+        door: true,
+        color: col,
+        materialId: mat,
+        pivot: [bx, pivotY, fz],
+        rotX: ang,
+        role: "Tapa",
+        edges: { front: true, back: true, left: true, right: true },
+      });
+      // Brazos hidráulicos (pistones a gas): unen el lateral interno con la tapa.
+      if (up && c.pistons !== false && open > 0.02) {
+        const dDoor = Math.min(0.35, c.h * 0.6); // anclaje en la tapa, medido desde el pivote
+        const bY = pivotY - dDoor * Math.cos(ang);
+        const bZ = fz - dDoor * Math.sin(ang);
+        const aY = pivotY - Math.min(0.28, c.h * 0.85);
+        const aZ = frontFace + Math.min(0.12, D * 0.4);
+        const dy = bY - aY;
+        const dz = bZ - aZ;
+        const len = Math.hypot(dy, dz) || 0.01;
+        const tilt = Math.atan2(-dy, dz); // orienta un cilindro (eje z) sobre el plano Y-Z
+        for (const side of [-1, 1]) {
+          const px = bx + side * (c.w / 2 - 0.03);
+          // cuerpo (cilindro grueso, arranca en el anclaje fijo) + vástago (fino, llega a la tapa)
+          panels.push({ pos: [px, aY + dy * 0.275, aZ + dz * 0.275], size: [0.024, 0.024, len * 0.58], cylinder: true, cylAxis: "z", rot: [tilt, 0, 0], color: "#7d848c" });
+          panels.push({ pos: [px, bY - dy * 0.225, bZ - dz * 0.225], size: [0.013, 0.013, len * 0.5], cylinder: true, cylAxis: "z", rot: [tilt, 0, 0], color: "#c9ced4" });
+        }
+      }
     } else if (c.kind === "doorSliding") {
-      // Hojas en 2 carriles bien separados. Cerradas: tilean el hueco con leve solape.
-      // Al abrir, cada hoja se corre hacia la izquierda y se apilan sobre la hoja 0.
+      // Hojas en 2 carriles bien separados, POR DELANTE de la carcasa. Cerradas:
+      // tilean el hueco con leve solape. Al abrir se corren y apilan sobre la hoja 0.
       const n = Math.max(2, c.count ?? 2);
       const seg = c.w / n;
       const overlap = c.overlap != null ? cl(c.overlap, 0, seg) : Math.min(0.04, seg * 0.12);
@@ -529,7 +580,7 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       const trackGap = ct + 0.012;
       for (let i = 0; i < n; i++) {
         const track = i % 2;
-        const z = frontZ - track * trackGap;
+        const z = frontFace - ct / 2 - track * trackGap;
         const closedX = -W / 2 + c.x + i * seg + seg / 2;
         const x = closedX - open * i * seg;
         panels.push({ pos: [x, cyTop(c.y, c.h), z], size: [leafW - GAP, c.h - GAP, ct], door: true, color: col, materialId: mat, role: "Puerta corrediza", edges: { front: true, back: true, left: true, right: true } });

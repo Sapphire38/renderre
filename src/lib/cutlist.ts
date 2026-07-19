@@ -20,6 +20,7 @@ export type Hardware = {
   slides: number; // pares de correderas
   pulls: number; // tiradores / manijas
   rods: number; // barrales
+  pistons: number; // pistones a gas / brazos hidráulicos (tapas verticales)
 };
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000; // a milímetros
@@ -57,13 +58,18 @@ export function cutList(f: Furniture): CutPiece[] {
 
 /** Cuenta los herrajes a partir de los componentes / puertas del mueble. */
 export function hardwareOf(f: Furniture): Hardware {
-  const hw: Hardware = { hinges: 0, slides: 0, pulls: 0, rods: 0 };
+  const hw: Hardware = { hinges: 0, slides: 0, pulls: 0, rods: 0, pistons: 0 };
   if (f.kind === "custom") {
     for (const c of f.components ?? []) {
       if (c.kind === "doorHinged") {
         const leaves = 1;
         hw.hinges += leaves * (c.h > 1.4 ? 3 : 2);
         hw.pulls += 1;
+      } else if (c.kind === "doorFlap") {
+        // bisagras arriba/abajo + pistones a gas si la tapa abre hacia arriba
+        hw.hinges += 2;
+        hw.pulls += 1;
+        if ((c.flapDir ?? "up") === "up" && c.pistons !== false) hw.pistons += 2;
       } else if (c.kind === "doorSliding") {
         hw.pulls += Math.max(2, c.count ?? 2);
       } else if (c.kind === "drawer") {
@@ -114,7 +120,8 @@ export function budgetOf(pieces: CutPiece[], hw: Hardware, pricing: Pricing): Bu
     hw.hinges * pricing.hingePrice +
     hw.slides * pricing.slidePrice +
     hw.pulls * pricing.pullPrice +
-    hw.rods * pricing.rodPrice;
+    hw.rods * pricing.rodPrice +
+    hw.pistons * (pricing.pistonPrice ?? 6000); // fallback para proyectos guardados sin este precio
   const labor = area * pricing.laborPerM2;
   return {
     pieces: count,

@@ -66,6 +66,7 @@ const ADD_BUTTONS: { kind: ComponentKind; label: string }[] = [
   { kind: "drawer", label: "Cajón" },
   { kind: "doorHinged", label: "Puerta" },
   { kind: "doorSliding", label: "Corrediza" },
+  { kind: "doorFlap", label: "Tapa vertical" },
   { kind: "divider", label: "División" },
   { kind: "board", label: "Placa" },
   { kind: "rod", label: "Barral" },
@@ -275,6 +276,34 @@ function CompProps({ c }: { c: FurnitureComponent }) {
           })()}
         </>
       )}
+      {c.kind === "doorFlap" && (
+        <>
+          <label className="flex items-center justify-between gap-2 py-1 text-sm">
+            <span className="text-neutral-400">Abre hacia</span>
+            <select
+              value={c.flapDir ?? "up"}
+              onFocus={beginEdit}
+              onChange={(e) => set({ flapDir: e.target.value as "up" | "down" })}
+              className="rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100"
+            >
+              <option value="up">Arriba (rebatible)</option>
+              <option value="down">Abajo (tipo bar)</option>
+            </select>
+          </label>
+          {(c.flapDir ?? "up") === "up" && (
+            <label className="flex items-center justify-between gap-2 py-1 text-sm">
+              <span className="text-neutral-400" title="Pistones a gas que sostienen la tapa abierta">Brazos hidráulicos</span>
+              <input
+                type="checkbox"
+                checked={c.pistons !== false}
+                onFocus={beginEdit}
+                onChange={(e) => set({ pistons: e.target.checked })}
+                className="h-4 w-4 accent-sky-500"
+              />
+            </label>
+          )}
+        </>
+      )}
       {c.kind === "doorHinged" && (
         <label className="flex items-center justify-between gap-2 py-1 text-sm">
           <span className="text-neutral-400">Bisagra</span>
@@ -322,7 +351,7 @@ function CompProps({ c }: { c: FurnitureComponent }) {
           </select>
         </label>
       )}
-      {(c.kind === "drawer" || c.kind === "doorHinged" || c.kind === "doorSliding") && (
+      {(c.kind === "drawer" || c.kind === "doorHinged" || c.kind === "doorSliding" || c.kind === "doorFlap") && (
         <label className="block py-1 text-sm">
           <span className="text-neutral-400">Apertura (preview)</span>
           <input

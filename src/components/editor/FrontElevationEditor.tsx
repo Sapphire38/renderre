@@ -9,6 +9,7 @@ const KIND_STYLE: Record<ComponentKind, { fill: string; stroke: string; label: s
   drawer: { fill: "rgba(96,165,250,0.22)", stroke: "#60a5fa", label: "Cajón" },
   doorHinged: { fill: "rgba(52,211,153,0.18)", stroke: "#34d399", label: "Puerta" },
   doorSliding: { fill: "rgba(45,212,191,0.18)", stroke: "#2dd4bf", label: "Corrediza" },
+  doorFlap: { fill: "rgba(251,146,60,0.20)", stroke: "#fb923c", label: "Tapa vertical" },
   divider: { fill: "rgba(148,163,184,0.35)", stroke: "#94a3b8", label: "División" },
   board: { fill: "rgba(167,139,250,0.20)", stroke: "#a78bfa", label: "Placa" },
   rod: { fill: "rgba(148,163,184,0.5)", stroke: "#cbd5e1", label: "Barral" },

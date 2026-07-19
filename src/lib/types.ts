@@ -125,6 +125,8 @@ export type Pricing = {
   slidePrice: number; // $ por par de correderas
   pullPrice: number;
   rodPrice: number;
+  /** $ por pistón a gas / brazo hidráulico (tapas de apertura vertical). Opcional para proyectos viejos. */
+  pistonPrice?: number;
   laborPerM2: number; // $ de mano de obra por m² de placa
   yield: number; // 0..1 aprovechamiento estimado de la placa (sin nesting)
 };
@@ -281,6 +283,7 @@ export type ComponentKind =
   | "drawer" // cajón (frente + caja)
   | "doorHinged" // puerta batiente
   | "doorSliding" // puerta corrediza
+  | "doorFlap" // tapa de apertura vertical (rebatible hacia arriba o abajo)
   | "divider" // división vertical
   | "board" // placa libre
   | "rod"; // barral
@@ -297,6 +300,10 @@ export type FurnitureComponent = {
   /** Corrediza: solape entre hojas (m). Si falta, se calcula automático (12% del segmento, tope 4 cm). */
   overlap?: number;
   hinge?: "left" | "right"; // puerta batiente
+  /** Tapa vertical (doorFlap): hacia dónde abre. "up" = alacena con brazos hidráulicos; "down" = rebatible tipo bar/escritorio. Default "up". */
+  flapDir?: "up" | "down";
+  /** Tapa vertical hacia arriba: dibujar los brazos hidráulicos (pistones a gas). Default true. */
+  pistons?: boolean;
   orient?: "front" | "horizontal" | "vertical"; // placa libre
   /** Placa: forma 3D. "box" (default) o una primitiva (cilindro/esfera/cono/pirámide/cuña). */
   shape?: "box" | "cylinder" | "sphere" | "cone" | "pyramid" | "wedge";
@@ -428,6 +435,7 @@ export const DEFAULT_PRICING: Pricing = {
   slidePrice: 8000,
   pullPrice: 1200,
   rodPrice: 3000,
+  pistonPrice: 6000,
   laborPerM2: 30000,
   yield: 0.75,
 };
