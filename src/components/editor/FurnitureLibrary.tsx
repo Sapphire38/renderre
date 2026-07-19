@@ -7,7 +7,7 @@ import { useEditor } from "@/lib/store";
 import { carcassPanels } from "@/lib/furniture";
 import { cutList, weightOf } from "@/lib/cutlist";
 import { Piece } from "./WorkbenchPreview3D";
-import EnvSwitch from "./EnvSwitch";
+import EnvSwitch, { TallerTabs } from "./EnvSwitch";
 import { CabinetIcon, CopyIcon, TrashIcon } from "./icons";
 import type { Furniture } from "@/lib/types";
 
@@ -98,15 +98,14 @@ export default function FurnitureLibrary() {
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-neutral-950 text-neutral-200">
       <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-neutral-800 px-3 sm:px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <CabinetIcon width={18} height={18} className="shrink-0 text-sky-400" />
-          <span className="text-sm font-semibold">Mis muebles</span>
-          <span className="hidden text-neutral-600 sm:inline">·</span>
-          <span className="hidden text-sm text-neutral-400 sm:inline">
-            {library.length} {library.length === 1 ? "mueble" : "muebles"} en el proyecto
-          </span>
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <CabinetIcon width={18} height={18} className="hidden shrink-0 text-sky-400 sm:block" />
+          <EnvSwitch />
+          <TallerTabs />
         </div>
-        <EnvSwitch />
+        <span className="hidden text-sm text-neutral-500 md:inline">
+          {library.length} {library.length === 1 ? "mueble guardado" : "muebles guardados"} en el proyecto
+        </span>
       </header>
 
       {library.length === 0 ? (
