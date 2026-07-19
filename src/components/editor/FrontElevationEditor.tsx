@@ -84,6 +84,8 @@ export default function FrontElevationEditor() {
   // Zoom/paneo de la vista: zoom multiplica la escala de ajuste; pan en píxeles.
   const viewRef = useRef({ zoom: 1, panX: 0, panY: 0 });
   const [zoomPct, setZoomPct] = useState(100);
+  // Panel de capas (lista de componentes con ocultar/mostrar).
+  const [layersOpen, setLayersOpen] = useState(false);
   // Punteros activos (para pellizco en táctil) y estado del pellizco.
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const pinchRef = useRef<{ d: number; mx: number; my: number } | null>(null);
@@ -227,19 +229,26 @@ export default function FrontElevationEditor() {
       }
     }
 
-    // componentes
+    // componentes (los ocultos no se dibujan, salvo el seleccionado: fantasma punteado)
     for (const c of comps) {
+      const sel = c.id === selectedId;
+      if (c.hidden && !sel) continue;
       const st = KIND_STYLE[c.kind];
       const cx0 = sx(c.x, t);
       const cy1 = sy(c.y + c.h, t);
       const cw = c.w * t.scale;
       const chh = c.h * t.scale;
+      if (c.hidden) {
+        ctx.save();
+        ctx.globalAlpha = 0.35;
+        ctx.setLineDash([5, 4]);
+      }
       ctx.fillStyle = st.fill;
       ctx.fillRect(cx0, cy1, cw, chh);
-      const sel = c.id === selectedId;
       ctx.strokeStyle = sel ? "#38bdf8" : st.stroke;
       ctx.lineWidth = sel ? 2.5 : 1.5;
       ctx.strokeRect(cx0, cy1, cw, chh);
+      if (c.hidden) ctx.restore();
       // etiqueta
       ctx.fillStyle = sel ? "#7dd3fc" : "rgba(226,232,240,0.85)";
       ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
@@ -431,14 +440,24 @@ export default function FrontElevationEditor() {
         }
       }
     }
-    // cuerpo (de arriba hacia abajo)
+    // cuerpo: junta TODOS los componentes bajo el cursor (de arriba hacia abajo).
+    // Clic normal = el de más arriba · Alt+clic = cicla hacia lo que está debajo
+    // (una puerta tapando el interior deja de ser un problema). Ocultos no cuentan.
+    const hits: FurnitureComponent[] = [];
     for (let i = comps.length - 1; i >= 0; i--) {
       const c = comps[i];
-      if (mx >= c.x && mx <= c.x + c.w && my >= c.y && my <= c.y + c.h) {
-        st.selectComponent(c.id);
-        gestureRef.current = { mode: "move", id: c.id, startFx: mx, startFy: my, ox: c.x, oy: c.y, committed: false };
-        return;
+      if (c.hidden) continue;
+      if (mx >= c.x && mx <= c.x + c.w && my >= c.y && my <= c.y + c.h) hits.push(c);
+    }
+    if (hits.length) {
+      let pick = hits[0];
+      if (e.altKey) {
+        const idx = hits.findIndex((c) => c.id === selectedId);
+        pick = hits[(idx + 1) % hits.length];
       }
+      st.selectComponent(pick.id);
+      gestureRef.current = { mode: "move", id: pick.id, startFx: mx, startFy: my, ox: pick.x, oy: pick.y, committed: false };
+      return;
     }
     // Vacío: deselecciona y arrastra la vista (paneo).
     st.selectComponent(null);
@@ -538,9 +557,74 @@ export default function FrontElevationEditor() {
         onPointerUp={endGesture}
         onPointerCancel={endGesture}
       />
-      <div className="pointer-events-none absolute left-3 top-2 text-[11px] text-neutral-500">
-        Alzado frontal · clic para seleccionar · arrastrá para mover · esquinas para redimensionar · rueda/pellizco: zoom · arrastrá el vacío: mover vista · Ctrl+C/V copia
+      <div className="pointer-events-none absolute left-3 top-2 pr-24 text-[11px] text-neutral-500">
+        Alzado frontal · clic: seleccionar · Alt+clic: lo que está debajo · arrastrá para mover · esquinas: redimensionar · rueda/pellizco: zoom · arrastrá el vacío: mover vista
       </div>
+
+      {/* Panel de capas: ocultar/mostrar componentes y seleccionar los tapados. */}
+      <button
+        type="button"
+        onClick={() => setLayersOpen((v) => !v)}
+        title="Capas: ocultar/mostrar componentes y seleccionar los que quedan tapados"
+        className={[
+          "absolute right-2 top-2 flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] backdrop-blur",
+          layersOpen
+            ? "border-sky-700/60 bg-sky-500/15 text-sky-200"
+            : "border-neutral-800 bg-neutral-900/90 text-neutral-300 hover:text-neutral-100",
+        ].join(" ")}
+      >
+        ▤ Capas{draft?.components?.some((c) => c.hidden) ? " ·👁" : ""}
+      </button>
+      {layersOpen && draft && (
+        <div className="absolute right-2 top-10 max-h-[70%] w-60 overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-900/95 p-1.5 shadow-xl backdrop-blur">
+          {(draft.components ?? []).length === 0 ? (
+            <p className="px-2 py-2 text-[11px] text-neutral-500">Sin componentes todavía.</p>
+          ) : (
+            // De arriba hacia abajo en el apilado (el último agregado tapa a los demás).
+            [...(draft.components ?? [])].reverse().map((c) => {
+              const st = KIND_STYLE[c.kind];
+              const sel = c.id === selectedId;
+              return (
+                <div
+                  key={c.id}
+                  onClick={() => useEditor.getState().selectComponent(c.id)}
+                  className={[
+                    "flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1",
+                    sel ? "bg-sky-500/15 ring-1 ring-sky-500/40" : "hover:bg-neutral-800",
+                  ].join(" ")}
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const est = useEditor.getState();
+                      est.pushDraftHistory();
+                      est.updateComponent(c.id, { hidden: !c.hidden });
+                    }}
+                    title={c.hidden ? "Mostrar (la pieza sigue en el despiece)" : "Ocultar en la vista (la pieza sigue en el despiece)"}
+                    className={[
+                      "grid h-5 w-6 shrink-0 place-items-center rounded text-[13px] leading-none",
+                      c.hidden ? "text-neutral-600 hover:text-neutral-400" : "text-neutral-300 hover:text-white",
+                    ].join(" ")}
+                  >
+                    {c.hidden ? "◌" : "👁"}
+                  </button>
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: st.stroke }} />
+                  <span className={["min-w-0 flex-1 truncate text-[11px]", c.hidden ? "text-neutral-600" : sel ? "text-sky-200" : "text-neutral-200"].join(" ")}>
+                    {st.label}
+                  </span>
+                  <span className="shrink-0 text-[10px] tabular-nums text-neutral-600">
+                    {Math.round(c.w * 100)}×{Math.round(c.h * 100)}
+                  </span>
+                </div>
+              );
+            })
+          )}
+          <p className="mt-1 border-t border-neutral-800 px-1.5 pt-1.5 text-[10px] leading-snug text-neutral-600">
+            El ojo oculta solo en la vista: la pieza sigue en el despiece y el presupuesto.
+          </p>
+        </div>
+      )}
       {/* Controles de zoom */}
       <div className="absolute bottom-2 right-2 flex items-center gap-0.5 rounded-lg border border-neutral-800 bg-neutral-900/90 px-1 py-0.5 text-neutral-300 shadow-lg backdrop-blur">
         <button

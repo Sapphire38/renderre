@@ -319,6 +319,9 @@ export type FurnitureComponent = {
   /** Estante: regulable con sistema 32 (perforaciones cada 32 mm en los laterales +
    *  4 soportes por estante en el conteo de herrajes). */
   adjustable?: boolean;
+  /** Oculto en el alzado y la vista 3D del taller (capa apagada). Es SOLO visual:
+   *  la pieza sigue contando en el despiece, herrajes y presupuesto. */
+  hidden?: boolean;
   open?: number; // 0..1 apertura para previsualizar
   color?: string; // color propio del componente (combinar acabados); si falta usa el del mueble
   materialId?: string; // material propio del componente (textura/melamina); tiene prioridad sobre color

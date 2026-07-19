@@ -100,10 +100,11 @@ export default function WorkbenchPreview3D() {
   }, []);
 
   // Para "abrir todo" aplicamos la apertura a una copia del mueble (no muta el draft).
+  // Los componentes con la capa oculta no se dibujan (pero siguen en el despiece).
   const shownDraft = useMemo(() => {
     if (!draft) return null;
-    if (openAll <= 0) return draft;
-    return { ...draft, components: (draft.components ?? []).map((c) => ({ ...c, open: openAll })) };
+    const comps = (draft.components ?? []).filter((c) => !c.hidden);
+    return { ...draft, components: openAll <= 0 ? comps : comps.map((c) => ({ ...c, open: openAll })) };
   }, [draft, openAll]);
 
   // Paneles + offset de explosión (cada pieza se aleja del centro del mueble).

@@ -218,6 +218,19 @@ function CompProps({ c }: { c: FurnitureComponent }) {
         </span>
       </label>
 
+      <label className="flex items-center justify-between gap-2 py-1 text-sm">
+        <span className="text-neutral-400" title="Oculta la pieza en el alzado y el 3D del taller para trabajar lo que está detrás. Sigue contando en el despiece.">
+          Ocultar en la vista
+        </span>
+        <input
+          type="checkbox"
+          checked={c.hidden === true}
+          onFocus={beginEdit}
+          onChange={(e) => set({ hidden: e.target.checked })}
+          className="h-4 w-4 accent-sky-500"
+        />
+      </label>
+
       <div className="py-1">
         <div className="mb-1 text-sm text-neutral-400">Material / textura</div>
         <div className="flex flex-wrap gap-1.5">
