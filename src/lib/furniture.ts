@@ -6,8 +6,9 @@ export type Panel = {
   pos: [number, number, number];
   size: [number, number, number];
   door?: boolean;
-  pivot?: [number, number, number]; // eje de giro (puerta batiente)
-  rotY?: number; // rotación alrededor del pivot
+  pivot?: [number, number, number]; // eje de giro (puerta batiente / tapa)
+  rotY?: number; // rotación alrededor del pivot (eje vertical, puerta batiente)
+  rotX?: number; // rotación alrededor del pivot (eje horizontal, tapa de apertura vertical)
   cylinder?: boolean; // forma cilíndrica (barral, hornalla, etc.)
   cylAxis?: "x" | "y" | "z"; // eje del cilindro (default "x"); largo = size en ese eje, radio = otro
   shape?: "sphere" | "cone" | "pyramid" | "wedge"; // primitivas no-caja
@@ -303,8 +304,9 @@ export function carcassPanels(f: Furniture): Panel[] {
     const doorH = H - 2 * t - gap * 2;
     for (let i = 0; i < f.doors; i++) {
       const dx = -W / 2 + gap + doorW / 2 + i * (doorW + gap);
+      // Frente sobrepuesto: la puerta va POR DELANTE de la carcasa (no incrustada en ella).
       panels.push({
-        pos: [dx, base + H / 2, -(D / 2 - t / 2)],
+        pos: [dx, base + H / 2, -(D / 2 + t / 2)],
         size: [doorW, doorH, t],
         door: true,
         role: "Puerta",
@@ -402,8 +404,16 @@ export function makeComponent(kind: ComponentKind, f: Furniture): FurnitureCompo
       return { id, kind, x: t, y: t, w: inW, h: inH, hinge: "left", open: 0 };
     case "doorSliding":
       return { id, kind, x: t, y: t, w: inW, h: inH, count: 2, open: 0 };
+    case "doorFlap": {
+      // Tapa vertical: por defecto ocupa la franja superior y abre hacia arriba con pistones.
+      const fh = Math.min(0.45, inH);
+      return { id, kind, x: t, y: Math.max(t, t + inH - fh), w: inW, h: fh, flapDir: "up", pistons: true, open: 0 };
+    }
     case "divider":
       return { id, kind, x: W / 2 - t / 2, y: t, w: t, h: inH };
+    case "cleat":
+      // Listón francés: tira horizontal (ripada a 45°) en la franja superior trasera.
+      return { id, kind, x: t, y: Math.max(t, H - t - 0.12), w: inW, h: 0.08 };
     case "rod":
       return { id, kind, x: t, y: H * 0.85, w: inW, h: 0.03 };
     case "board":
@@ -423,17 +433,39 @@ export function buildCustomPanels(f: Furniture): Panel[] {
   const panels: Panel[] = [];
 
   // carcasa (caja). Se puede desactivar para hacer formas libres (ej. una escalera).
+  const plinth = Math.min(Math.max(f.plinth ?? 0, 0), H / 2);
   if (f.carcass !== false) {
     panels.push({ pos: [-(W / 2 - t / 2), base + H / 2, 0], size: [t, H, D], role: "Lateral", edges: { front: true } });
     panels.push({ pos: [W / 2 - t / 2, base + H / 2, 0], size: [t, H, D], role: "Lateral", edges: { front: true } });
-    panels.push({ pos: [0, base + t / 2, 0], size: [inW, t, D], role: "Piso", edges: { front: true } });
+    // Con zócalo el piso del mueble sube y se agrega la tira de zócalo retirada del frente.
+    panels.push({ pos: [0, base + plinth + t / 2, 0], size: [inW, t, D], role: "Piso", edges: { front: true } });
     panels.push({ pos: [0, base + H - t / 2, 0], size: [inW, t, D], role: "Techo", edges: { front: true } });
-    if (f.back !== false) panels.push({ pos: [0, base + H / 2, D / 2 - t / 2], size: [inW, H - 2 * t, t], role: "Fondo" });
+    if (plinth > 0.005) {
+      const pin = Math.min(Math.max(f.plinthInset ?? 0.05, 0), D / 2);
+      panels.push({ pos: [0, base + plinth / 2, -D / 2 + pin + t / 2], size: [inW, plinth, t], role: "Zócalo", edges: { front: true } });
+    }
+    if (f.back !== false) {
+      // Fondo con espesor propio (típico 3 mm) y retiro desde atrás: con 18–20 mm de
+      // retiro queda el hueco para embutir un listón francés oculto contra la pared.
+      // Ranurado: entra 6 mm por lado en laterales/piso/techo → la pieza sale más grande
+      // (queda oculta dentro de la ranura; en 3D el solape no se ve).
+      const bt = Math.min(f.backThickness ?? t, D / 2);
+      const groove = f.backGroove === true;
+      const biDefault = groove ? 0.01 : 0;
+      const bi = Math.min(Math.max(f.backInset ?? biDefault, 0), Math.max(0, D - bt - 0.01));
+      const g2 = groove ? 0.012 : 0; // 6 mm por lado
+      panels.push({ pos: [0, base + plinth / 2 + H / 2, D / 2 - bi - bt / 2], size: [inW + g2, H - plinth - 2 * t + g2, bt], role: groove ? "Fondo (ranurado)" : "Fondo" });
+    }
   }
 
+  // Luz entre frentes (puertas, tapas, frentes de cajón). Configurable por mueble.
+  const GAPF = Math.min(Math.max(f.frontGap ?? GAP, 0), 0.02);
   const cx = (x: number, w: number) => -W / 2 + x + w / 2;
   const cyTop = (y: number, h: number) => base + y + h / 2;
-  const frontZ = -(D / 2 - t / 2);
+  // Cara frontal de la carcasa. Los FRENTES (puertas, tapas, frentes de cajón) van
+  // sobrepuestos POR DELANTE de este plano — si quedaran dentro (z = -D/2 + t/2) se
+  // incrustan en laterales/piso/techo y la tapa cerrada se ve metida en el mueble.
+  const frontFace = -D / 2;
   const cl = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
   const fullD = D - t;
   // Profundidad (eje Z) y retiro desde el frente de un componente.
@@ -462,6 +494,18 @@ export function buildCustomPanels(f: Furniture): Panel[] {
     } else if (c.kind === "divider") {
       const d = depthZ(c);
       panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), d.zc], size: [Math.max(c.w, ct), c.h, d.zs], color: col, materialId: mat, role: "División", edges: { front: true } });
+    } else if (c.kind === "cleat") {
+      // Listón francés: tira pegada a la cara trasera del mueble (dentro del retiro del
+      // fondo si lo hay). Se corta ripado a 45° — el ángulo va como nota en el despiece.
+      const clT = cl(c.depth ?? Math.max(ct, 0.018), 0.009, D / 2);
+      panels.push({
+        pos: [cx(c.x, c.w), cyTop(c.y, c.h), D / 2 - clT / 2],
+        size: [c.w, c.h, clT],
+        color: col ?? "#a89170",
+        materialId: mat,
+        role: "Listón francés (45°)",
+        edges: { front: true },
+      });
     } else if (c.kind === "rod") {
       panels.push({ pos: [cx(c.x, c.w), base + c.y, 0], size: [c.w, 0.03, 0.03], cylinder: true, color: col ?? "#9aa3ad" });
     } else if (c.kind === "board") {
@@ -477,7 +521,7 @@ export function buildCustomPanels(f: Furniture): Panel[] {
         else panels.push({ pos, size, shape: shp, color: col, materialId: mat });
       } else if (o === "front") {
         const inset = cl(c.depthInset ?? 0, 0, Math.max(0, D - ct));
-        panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), frontZ + inset], size: [c.w, c.h, ct], color: col, materialId: mat, role: "Placa", edges: { front: true, back: true, left: true, right: true } });
+        panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), frontFace + ct / 2 + inset], size: [c.w, c.h, ct], color: col, materialId: mat, role: "Placa", edges: { front: true, back: true, left: true, right: true } });
       } else if (o === "horizontal") {
         const d = depthZ(c);
         panels.push({ pos: [cx(c.x, c.w), base + c.y + c.h / 2, d.zc], size: [c.w, ct, d.zs], color: col, materialId: mat, role: "Placa", edges: { front: true } });
@@ -493,12 +537,13 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       for (let i = 0; i < n; i++) {
         const dy = c.y + i * each;
         const fY = cyTop(dy, each);
-        const fz = frontZ - pull;
+        // frente sobrepuesto: cerrado queda apoyado contra la cara frontal del mueble
+        const fz = frontFace - ct / 2 - pull;
         const bxc = cx(c.x, c.w);
         const boxZc = fz + ct / 2 + boxD / 2;
         const sideH = Math.max(each * 0.55, 0.05);
         const boxYc = fY - each / 2 + sideH / 2 + ct;
-        panels.push({ pos: [bxc, fY, fz], size: [c.w - GAP, each - GAP, ct], door: true, color: col, materialId: mat, role: "Frente cajón", edges: { front: true, back: true, left: true, right: true } }); // frente
+        panels.push({ pos: [bxc, fY, fz], size: [c.w - GAPF, each - GAPF, ct], door: true, color: col, materialId: mat, role: "Frente cajón", edges: { front: true, back: true, left: true, right: true } }); // frente
         panels.push({ pos: [bxc, fY - each / 2 + ct, boxZc], size: [c.w - 2 * ct, ct, boxD], role: "Piso cajón" }); // piso
         panels.push({ pos: [bxc, boxYc, boxZc + boxD / 2 - ct / 2], size: [c.w - 2 * ct, sideH, ct], role: "Contrafrente cajón" }); // fondo cajón
         panels.push({ pos: [bxc - c.w / 2 + ct / 2, boxYc, boxZc], size: [ct, sideH, boxD], role: "Lateral cajón" }); // lado izq
@@ -508,20 +553,60 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       const hingeLeft = (c.hinge ?? "left") === "left";
       const pivotX = hingeLeft ? cx(c.x, c.w) - c.w / 2 : cx(c.x, c.w) + c.w / 2;
       const rot = (hingeLeft ? 1 : -1) * open * Math.PI * 0.62;
+      const fz = frontFace - ct / 2; // hoja sobrepuesta al frente
       panels.push({
-        pos: [cx(c.x, c.w), cyTop(c.y, c.h), frontZ],
-        size: [c.w - GAP, c.h - GAP, ct],
+        pos: [cx(c.x, c.w), cyTop(c.y, c.h), fz],
+        size: [c.w - GAPF, c.h - GAPF, ct],
         door: true,
         color: col,
         materialId: mat,
-        pivot: [pivotX, cyTop(c.y, c.h), frontZ],
+        pivot: [pivotX, cyTop(c.y, c.h), fz],
         rotY: rot,
         role: "Puerta",
         edges: { front: true, back: true, left: true, right: true },
       });
+    } else if (c.kind === "doorFlap") {
+      // Tapa de apertura vertical: rebate alrededor del borde superior ("up", con
+      // brazos hidráulicos) o del borde inferior ("down", tipo bar/escritorio).
+      const dir = c.flapDir ?? "up";
+      const fz = frontFace - ct / 2; // tapa sobrepuesta al frente
+      const bx = cx(c.x, c.w);
+      const up = dir === "up";
+      const pivotY = up ? base + c.y + c.h : base + c.y;
+      // "up": rota hacia afuera/arriba (~100° con pistones); "down": hasta horizontal (90°).
+      const ang = up ? open * Math.PI * 0.55 : -open * Math.PI * 0.5;
+      panels.push({
+        pos: [bx, cyTop(c.y, c.h), fz],
+        size: [c.w - GAPF, c.h - GAPF, ct],
+        door: true,
+        color: col,
+        materialId: mat,
+        pivot: [bx, pivotY, fz],
+        rotX: ang,
+        role: "Tapa",
+        edges: { front: true, back: true, left: true, right: true },
+      });
+      // Brazos hidráulicos (pistones a gas): unen el lateral interno con la tapa.
+      if (up && c.pistons !== false && open > 0.02) {
+        const dDoor = Math.min(0.35, c.h * 0.6); // anclaje en la tapa, medido desde el pivote
+        const bY = pivotY - dDoor * Math.cos(ang);
+        const bZ = fz - dDoor * Math.sin(ang);
+        const aY = pivotY - Math.min(0.28, c.h * 0.85);
+        const aZ = frontFace + Math.min(0.12, D * 0.4);
+        const dy = bY - aY;
+        const dz = bZ - aZ;
+        const len = Math.hypot(dy, dz) || 0.01;
+        const tilt = Math.atan2(-dy, dz); // orienta un cilindro (eje z) sobre el plano Y-Z
+        for (const side of [-1, 1]) {
+          const px = bx + side * (c.w / 2 - 0.03);
+          // cuerpo (cilindro grueso, arranca en el anclaje fijo) + vástago (fino, llega a la tapa)
+          panels.push({ pos: [px, aY + dy * 0.275, aZ + dz * 0.275], size: [0.024, 0.024, len * 0.58], cylinder: true, cylAxis: "z", rot: [tilt, 0, 0], color: "#7d848c" });
+          panels.push({ pos: [px, bY - dy * 0.225, bZ - dz * 0.225], size: [0.013, 0.013, len * 0.5], cylinder: true, cylAxis: "z", rot: [tilt, 0, 0], color: "#c9ced4" });
+        }
+      }
     } else if (c.kind === "doorSliding") {
-      // Hojas en 2 carriles bien separados. Cerradas: tilean el hueco con leve solape.
-      // Al abrir, cada hoja se corre hacia la izquierda y se apilan sobre la hoja 0.
+      // Hojas en 2 carriles bien separados, POR DELANTE de la carcasa. Cerradas:
+      // tilean el hueco con leve solape. Al abrir se corren y apilan sobre la hoja 0.
       const n = Math.max(2, c.count ?? 2);
       const seg = c.w / n;
       const overlap = c.overlap != null ? cl(c.overlap, 0, seg) : Math.min(0.04, seg * 0.12);
@@ -529,15 +614,138 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       const trackGap = ct + 0.012;
       for (let i = 0; i < n; i++) {
         const track = i % 2;
-        const z = frontZ - track * trackGap;
+        const z = frontFace - ct / 2 - track * trackGap;
         const closedX = -W / 2 + c.x + i * seg + seg / 2;
         const x = closedX - open * i * seg;
-        panels.push({ pos: [x, cyTop(c.y, c.h), z], size: [leafW - GAP, c.h - GAP, ct], door: true, color: col, materialId: mat, role: "Puerta corrediza", edges: { front: true, back: true, left: true, right: true } });
+        panels.push({ pos: [x, cyTop(c.y, c.h), z], size: [leafW - GAPF, c.h - GAPF, ct], door: true, color: col, materialId: mat, role: "Puerta corrediza", edges: { front: true, back: true, left: true, right: true } });
       }
     }
   }
   return panels;
 }
+
+// ===================== Plantillas del taller (variantes de mueble) =====================
+
+export type WorkshopTemplate = { id: string; name: string; hint: string; build: () => Furniture };
+
+/** Base común para las plantillas: mueble custom con medidas y componentes dados. */
+function tpl(
+  name: string,
+  dims: Partial<Furniture>,
+  comps: (f: Furniture) => Omit<FurnitureComponent, "id">[],
+): Furniture {
+  const f: Furniture = { ...makeCustomFurniture(), ...dims, id: uid(), name };
+  f.components = comps(f).map((c) => ({ ...c, id: uid() }));
+  return f;
+}
+
+/**
+ * Variantes típicas de carpintería, listas para ajustar medidas. Cada una arma un
+ * mueble completo (carcasa + componentes) que después se edita libremente.
+ */
+export const WORKSHOP_TEMPLATES: WorkshopTemplate[] = [
+  {
+    id: "cajonera",
+    name: "Cajonera (4 cajones)",
+    hint: "Módulo de cajones parejos con correderas",
+    build: () =>
+      tpl("Cajonera", { width: 0.6, depth: 0.5, height: 0.9 }, (f) => [
+        { kind: "drawer", x: f.panel, y: f.panel, w: f.width - 2 * f.panel, h: f.height - 2 * f.panel, count: 4, open: 0 },
+      ]),
+  },
+  {
+    id: "alacena-rebatible",
+    name: "Alacena rebatible (tapa arriba)",
+    hint: "Tapa vertical con brazos hidráulicos, colgada",
+    build: () =>
+      tpl("Alacena rebatible", { width: 0.9, depth: 0.35, height: 0.42, baseHeight: 1.45, backThickness: 0.003, backInset: 0.02 }, (f) => [
+        { kind: "cleat", x: f.panel, y: f.height - f.panel - 0.1, w: f.width - 2 * f.panel, h: 0.08 },
+        { kind: "doorFlap", x: f.panel, y: f.panel, w: f.width - 2 * f.panel, h: f.height - 2 * f.panel, flapDir: "up", pistons: true, open: 0 },
+      ]),
+  },
+  {
+    id: "mueble-bar",
+    name: "Mueble bar (tapa abajo)",
+    hint: "Tapa rebatible hacia abajo que hace de mesada",
+    build: () =>
+      tpl("Mueble bar", { width: 0.8, depth: 0.4, height: 1.1 }, (f) => {
+        const t = f.panel;
+        const inW = f.width - 2 * t;
+        return [
+          { kind: "shelf", x: t, y: f.height * 0.55, w: inW, h: t },
+          { kind: "doorFlap", x: t, y: f.height * 0.55 + t, w: inW, h: f.height - t - (f.height * 0.55 + t), flapDir: "down", open: 0 },
+          { kind: "doorHinged", x: t, y: t, w: inW / 2, h: f.height * 0.55 - t, hinge: "left", open: 0 },
+          { kind: "doorHinged", x: t + inW / 2, y: t, w: inW / 2, h: f.height * 0.55 - t, hinge: "right", open: 0 },
+        ];
+      }),
+  },
+  {
+    id: "placard",
+    name: "Placard 2 puertas + barral",
+    hint: "Interior con barral, estante superior y cajonera",
+    build: () =>
+      tpl("Placard", { width: 1.2, depth: 0.6, height: 2.2 }, (f) => {
+        const t = f.panel;
+        const inW = f.width - 2 * t;
+        return [
+          { kind: "shelf", x: t, y: f.height - t - 0.35, w: inW, h: t },
+          { kind: "rod", x: t, y: f.height - t - 0.45, w: inW, h: 0.03 },
+          { kind: "drawer", x: t, y: t, w: inW, h: 0.6, count: 3, open: 0 },
+          { kind: "doorHinged", x: t, y: t, w: inW / 2, h: f.height - 2 * t, hinge: "left", open: 0 },
+          { kind: "doorHinged", x: t + inW / 2, y: t, w: inW / 2, h: f.height - 2 * t, hinge: "right", open: 0 },
+        ];
+      }),
+  },
+  {
+    id: "rack-flotante",
+    name: "Rack TV flotante (francés)",
+    hint: "Colgado con listón francés embutido, fondo retirado",
+    build: () =>
+      tpl("Rack TV flotante", { width: 1.6, depth: 0.35, height: 0.4, baseHeight: 0.45, backThickness: 0.003, backInset: 0.02 }, (f) => {
+        const t = f.panel;
+        const inW = f.width - 2 * t;
+        return [
+          { kind: "cleat", x: t, y: f.height - t - 0.1, w: inW, h: 0.08 },
+          { kind: "drawer", x: t, y: t, w: inW / 2 - 0.0015, h: f.height - 2 * t, count: 1, open: 0 },
+          { kind: "drawer", x: t + inW / 2 + 0.0015, y: t, w: inW / 2 - 0.0015, h: f.height - 2 * t, count: 1, open: 0 },
+        ];
+      }),
+  },
+  {
+    id: "biblioteca",
+    name: "Biblioteca abierta",
+    hint: "Estantes parejos, fondo de 3 mm",
+    build: () =>
+      tpl("Biblioteca", { width: 0.9, depth: 0.3, height: 1.8, backThickness: 0.003 }, (f) => {
+        const t = f.panel;
+        const inW = f.width - 2 * t;
+        const inH = f.height - 2 * t;
+        const n = 4;
+        return Array.from({ length: n }, (_, i) => ({
+          kind: "shelf" as const,
+          x: t,
+          y: t + (inH * (i + 1)) / (n + 1),
+          w: inW,
+          h: t,
+        }));
+      }),
+  },
+  {
+    id: "bajo-mesada",
+    name: "Bajo mesada cajón + puerta",
+    hint: "Con zócalo, cajón superior y puerta batiente",
+    build: () =>
+      tpl("Bajo mesada", { width: 0.6, depth: 0.58, height: 0.85, plinth: 0.1, plinthInset: 0.05 }, (f) => {
+        const t = f.panel;
+        const inW = f.width - 2 * t;
+        const y0 = 0.1 + t; // el interior arranca sobre el zócalo
+        return [
+          { kind: "drawer", x: t, y: f.height - t - 0.18, w: inW, h: 0.18, count: 1, open: 0 },
+          { kind: "doorHinged", x: t, y: y0, w: inW, h: f.height - t - 0.18 - 0.003 - y0, hinge: "left", open: 0 },
+        ];
+      }),
+  },
+];
 
 /** Genera la forma 3D (cajas + cilindros con color) de un equipamiento. Frente hacia -z. */
 export function appliancePanels(f: Furniture): Panel[] {

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useEditor } from "@/lib/store";
-import { cutList, hardwareOf, budgetOf } from "@/lib/cutlist";
+import { cutList, hardwareOf, budgetOf, weightOf } from "@/lib/cutlist";
 import { nest } from "@/lib/nesting";
 import type { Pricing } from "@/lib/types";
 
@@ -69,8 +69,8 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [allPieces, cutQty],
   );
-  const fullHw = useMemo(() => (draft ? hardwareOf(draft) : { hinges: 0, slides: 0, pulls: 0, rods: 0 }), [draft]);
-  const hw = includeHw ? fullHw : { hinges: 0, slides: 0, pulls: 0, rods: 0 };
+  const fullHw = useMemo(() => (draft ? hardwareOf(draft) : { hinges: 0, slides: 0, pulls: 0, rods: 0, pistons: 0, pins: 0 }), [draft]);
+  const hw = includeHw ? fullHw : { hinges: 0, slides: 0, pulls: 0, rods: 0, pistons: 0, pins: 0 };
   const budget = useMemo(() => budgetOf(pieces, hw, pricing), [pieces, hw, pricing]);
   const nesting = useMemo(() => nest(pieces, pricing.boardW, pricing.boardH), [pieces, pricing.boardW, pricing.boardH]);
   const partial = !includeHw || allPieces.some((p) => qtyOf(p) !== p.qty);
@@ -112,6 +112,77 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
   const materialCost = boards * pricing.boardPrice;
   const total = materialCost + budget.cost.edge + budget.cost.hardware + budget.cost.labor;
 
+  // Hoja de taller imprimible (el diálogo de impresión permite "Guardar como PDF"):
+  // encabezado, despiece, herrajes, costos y plano de corte en blanco y negro.
+  const printSheet = () => {
+    const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const rows = pieces
+      .map(
+        (p) =>
+          `<tr><td>${esc(p.role)}</td><td class="r">${mm(p.largo)}</td><td class="r">${mm(p.ancho)}</td><td class="r">${mm(p.thickness)}</td><td class="r">${p.qty}</td><td class="r">${p.edgeMeters > 0 ? (p.edgeMeters * p.qty).toFixed(2) : "—"}</td><td>${esc(matName(p.materialId))}</td></tr>`,
+      )
+      .join("");
+    const hwRows = [
+      ["Bisagras", hw.hinges],
+      ["Correderas (par)", hw.slides],
+      ["Tiradores", hw.pulls],
+      ["Barrales", hw.rods],
+      ["Pistones a gas", hw.pistons],
+      ["Soportes de estante", hw.pins],
+    ]
+      .filter(([, n]) => (n as number) > 0)
+      .map(([k, n]) => `<tr><td>${k}</td><td class="r">${n}</td></tr>`)
+      .join("");
+    const PXM = 210; // px por metro en el plano impreso
+    const svgs = nesting.boards
+      .map((b) => {
+        const rects = b.pieces
+          .map(
+            (p) =>
+              `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="none" stroke="#333" stroke-width="0.004"/>` +
+              `<text x="${p.x + p.w / 2}" y="${p.y + p.h / 2}" font-size="${Math.min(0.045, p.h / 3, p.w / 7)}" text-anchor="middle" dominant-baseline="central">${Math.round((p.rot ? p.h : p.w) * 1000)}×${Math.round((p.rot ? p.w : p.h) * 1000)}${p.rot ? " ↻" : ""}</text>`,
+          )
+          .join("");
+        return `<div class="board"><div class="cap">Placa ${b.index + 1} · ${Math.round(b.thickness * 1000)} mm · ${b.w.toFixed(2)}×${b.h.toFixed(2)} m</div><svg width="${b.w * PXM}" height="${b.h * PXM}" viewBox="0 0 ${b.w} ${b.h}"><rect width="${b.w}" height="${b.h}" fill="#fff" stroke="#000" stroke-width="0.008"/>${rects}</svg></div>`;
+      })
+      .join("");
+    const w = window.open("", "_blank", "width=980,height=760");
+    if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Hoja de taller — ${esc(draft.name)}</title>
+<style>
+  body{font:12px/1.45 system-ui,sans-serif;color:#111;margin:24px}
+  h1{font-size:18px;margin:0 0 2px} h2{font-size:13px;margin:16px 0 6px;text-transform:uppercase;letter-spacing:.04em}
+  .sub{color:#555;margin-bottom:12px}
+  table{border-collapse:collapse;width:100%} th,td{border:1px solid #bbb;padding:3px 7px;text-align:left} th{background:#eee;font-size:11px}
+  td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
+  .cols{display:flex;gap:24px;align-items:flex-start} .cols>div{flex:1}
+  .board{display:inline-block;margin:0 14px 14px 0;vertical-align:top} .cap{font-size:11px;color:#444;margin-bottom:3px}
+  .tot{font-weight:700}
+  @media print{.noprint{display:none}}
+</style></head><body>
+<h1>Hoja de taller — ${esc(draft.name)}</h1>
+<div class="sub">${Math.round(draft.width * 1000)} × ${Math.round(draft.height * 1000)} × ${Math.round(draft.depth * 1000)} mm · MDF ${Math.round(draft.panel * 1000)} mm · ${budget.pieces} piezas · ${weightOf(pieces).toFixed(1)} kg estim. · ${boards} placa(s) · canto ${budget.edgeMeters.toFixed(1)} ml${partial ? " · CÁLCULO PARCIAL" : ""} · ${new Date().toLocaleDateString("es-AR")}</div>
+<h2>Despiece (mm)</h2>
+<table><thead><tr><th>Rol</th><th class="r">Largo</th><th class="r">Ancho</th><th class="r">Esp.</th><th class="r">Cant.</th><th class="r">Canto (ml)</th><th>Material</th></tr></thead><tbody>${rows}</tbody></table>
+<div class="cols">
+<div><h2>Herrajes</h2><table><tbody>${hwRows || `<tr><td colspan="2">—</td></tr>`}</tbody></table></div>
+<div><h2>Costos</h2><table><tbody>
+<tr><td>Placas (${boards})</td><td class="r">${money(materialCost)}</td></tr>
+<tr><td>Canto (${budget.edgeMeters.toFixed(1)} ml)</td><td class="r">${money(budget.cost.edge)}</td></tr>
+<tr><td>Herrajes</td><td class="r">${money(budget.cost.hardware)}</td></tr>
+<tr><td>Mano de obra</td><td class="r">${money(budget.cost.labor)}</td></tr>
+<tr class="tot"><td>Total</td><td class="r">${money(total)}</td></tr>
+</tbody></table></div>
+</div>
+<h2>Plano de corte (${Math.round(nesting.yield * 100)}% aprovechamiento)</h2>
+${svgs || "<p>—</p>"}
+<button class="noprint" onclick="window.print()" style="margin-top:12px;padding:6px 14px">Imprimir / guardar PDF</button>
+</body></html>`);
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 350);
+  };
+
   return (
     <div className="absolute inset-0 z-10 flex flex-col bg-neutral-950">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2.5 sm:px-4">
@@ -146,6 +217,14 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
           </button>
           <button
             type="button"
+            onClick={printSheet}
+            title="Hoja de taller para imprimir o guardar como PDF (despiece + herrajes + costos + plano de corte)"
+            className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-200 hover:border-sky-500 hover:bg-neutral-800"
+          >
+            🖨 <span className="hidden sm:inline">Imprimir / PDF</span><span className="sm:hidden">PDF</span>
+          </button>
+          <button
+            type="button"
             onClick={onClose}
             className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500"
           >
@@ -170,10 +249,14 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* Resumen */}
-        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
           <div className={card}>
             <div className="text-[11px] uppercase tracking-wide text-neutral-500">Piezas</div>
             <div className="text-lg font-semibold text-neutral-100">{budget.pieces}</div>
+          </div>
+          <div className={card}>
+            <div className="text-[11px] uppercase tracking-wide text-neutral-500" title="Estimado con densidad MDF ≈ 730 kg/m³ (para colgado y transporte)">Peso estim.</div>
+            <div className="text-lg font-semibold text-neutral-100">{weightOf(pieces).toFixed(1)} kg</div>
           </div>
           <div className={card}>
             <div className="text-[11px] uppercase tracking-wide text-neutral-500">Sup. de placa</div>
@@ -256,11 +339,13 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
 
             {/* Herrajes */}
             <h3 className="mb-2 mt-4 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Herrajes</h3>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
               <div className={card}><div className="text-[11px] text-neutral-500">Bisagras</div><div className="font-semibold text-neutral-100">{hw.hinges}</div></div>
               <div className={card}><div className="text-[11px] text-neutral-500">Correderas (par)</div><div className="font-semibold text-neutral-100">{hw.slides}</div></div>
               <div className={card}><div className="text-[11px] text-neutral-500">Tiradores</div><div className="font-semibold text-neutral-100">{hw.pulls}</div></div>
               <div className={card}><div className="text-[11px] text-neutral-500">Barrales</div><div className="font-semibold text-neutral-100">{hw.rods}</div></div>
+              <div className={card}><div className="text-[11px] text-neutral-500">Pistones a gas</div><div className="font-semibold text-neutral-100">{hw.pistons}</div></div>
+              <div className={card}><div className="text-[11px] text-neutral-500">Soportes estante</div><div className="font-semibold text-neutral-100">{hw.pins}</div></div>
             </div>
           </div>
 
@@ -295,6 +380,8 @@ export default function WorkbenchCutList({ onClose }: { onClose: () => void }) {
                 <PriceField label="Corredera par ($)" value={pricing.slidePrice} step={100} onChange={(v) => set({ slidePrice: Math.max(0, v) })} />
                 <PriceField label="Tirador ($)" value={pricing.pullPrice} step={50} onChange={(v) => set({ pullPrice: Math.max(0, v) })} />
                 <PriceField label="Barral ($)" value={pricing.rodPrice} step={50} onChange={(v) => set({ rodPrice: Math.max(0, v) })} />
+                <PriceField label="Pistón a gas ($)" value={pricing.pistonPrice ?? 6000} step={100} onChange={(v) => set({ pistonPrice: Math.max(0, v) })} />
+                <PriceField label="Soporte estante ($)" value={pricing.shelfPinPrice ?? 150} step={10} onChange={(v) => set({ shelfPinPrice: Math.max(0, v) })} />
                 <PriceField label="Mano de obra ($/m²)" value={pricing.laborPerM2} step={500} onChange={(v) => set({ laborPerM2: Math.max(0, v) })} />
               </div>
             )}

@@ -18,7 +18,7 @@ function shade(hex: string, amt: number): string {
 }
 
 function Piece({ panel, baseColor, materials }: { panel: Panel & { offset?: [number, number, number] }; baseColor: string; materials: Material[] }) {
-  const { pos, size, cylinder, cylAxis, shape, pivot, rotY, door } = panel;
+  const { pos, size, cylinder, cylAxis, shape, pivot, rotY, rotX, rot, door } = panel;
   const matColor = panel.materialId ? materials.find((m) => m.id === panel.materialId)?.color : undefined;
   const color = matColor ?? panel.color ?? (door ? shade(baseColor, -0.06) : baseColor);
   const wedgeGeom = useMemo(() => {
@@ -57,18 +57,27 @@ function Piece({ panel, baseColor, materials }: { panel: Panel & { offset?: [num
     }
   }
   const off = panel.offset ?? [0, 0, 0];
+  // El grupo-pivote solo aplica si hay rotación real. OJO: si la pieza está cerrada
+  // (rot 0) hay que renderizar en coordenadas MUNDO — usar pos-pivot sin el grupo
+  // deja la puerta/tapa corrida (metida en el piso o fuera del mueble).
+  const pivoting = !!pivot && (!!rotY || !!rotX);
   const gpos: [number, number, number] = pivot ? [pivot[0] + off[0], pivot[1] + off[1], pivot[2] + off[2]] : pos;
-  const local: [number, number, number] = pivot
-    ? [pos[0] - pivot[0], pos[1] - pivot[1], pos[2] - pivot[2]]
+  const local: [number, number, number] = pivoting
+    ? [pos[0] - pivot![0], pos[1] - pivot![1], pos[2] - pivot![2]]
     : [pos[0] + off[0], pos[1] + off[1], pos[2] + off[2]];
+  // Inclinación propia de la pieza (ej. brazos hidráulicos), compuesta con la rotación de la geometría.
+  const finalRot: [number, number, number] = rot
+    ? [meshRot[0] + rot[0], meshRot[1] + rot[1], meshRot[2] + rot[2]]
+    : meshRot;
   const node = (
-    <mesh position={local} rotation={meshRot} castShadow receiveShadow>
+    <mesh position={local} rotation={finalRot} castShadow receiveShadow>
       {geom}
       <meshStandardMaterial color={color} roughness={0.72} metalness={panel.color || matColor ? 0.2 : 0} />
     </mesh>
   );
-  return pivot && rotY ? (
-    <group position={gpos} rotation={[0, rotY, 0]}>
+  // Pivote de giro: puertas batientes (rotY, eje vertical) y tapas verticales (rotX, eje horizontal).
+  return pivoting ? (
+    <group position={gpos} rotation={[rotX ?? 0, rotY ?? 0, 0]}>
       {node}
     </group>
   ) : (

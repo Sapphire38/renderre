@@ -277,8 +277,8 @@ export default function ProjectBar() {
         <button
           type="button"
           onClick={() => openWorkbench()}
-          title="Crear un mueble en el taller"
-          className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-sky-300 hover:bg-neutral-800"
+          title="Crear un mueble en el taller (función principal)"
+          className="flex items-center gap-1.5 rounded-md border border-sky-700/60 bg-sky-500/10 px-2.5 py-1.5 text-sm font-medium text-sky-300 hover:bg-sky-500/20"
         >
           <CabinetIcon width={16} height={16} /> Taller
         </button>

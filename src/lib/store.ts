@@ -27,7 +27,7 @@ import type {
   Vec2,
 } from "./types";
 import { uid } from "./geometry";
-import { carcassPanels, customFromPreset, makeComponent, makeCustomFurniture, makeFurniture } from "./furniture";
+import { carcassPanels, customFromPreset, makeComponent, makeCustomFurniture, makeFurniture, WORKSHOP_TEMPLATES } from "./furniture";
 import { makeOpening, OPENING_STYLES, defaultStyle } from "./openings";
 import { makeSurface, makePolygonSurface } from "./surfaces";
 import { makeTerrain, sculpt as sculptHeights, type TerrainMode } from "./terrain";
@@ -206,8 +206,15 @@ export type EditorState = {
   openWorkbenchFromPreset: (kind: FurnitureKind) => void;
   loadPresetBase: (kind: FurnitureKind) => void;
   removeFromLibrary: (libId: string) => void;
+  duplicateInLibrary: (libId: string) => void;
   closeWorkbench: () => void;
   loadDraft: (f: Furniture) => void;
+  /** Reemplaza el borrador por una plantilla del taller (cajonera, placard, etc.). */
+  loadTemplate: (tplId: string) => void;
+  /** Arranca un mueble nuevo en blanco (sin cerrar el taller). */
+  newDraft: () => void;
+  /** Guarda/actualiza el borrador en "Mis muebles" SIN colocarlo en el plano (modo aislado). */
+  saveDraftToLibrary: () => void;
   updateDraft: (patch: Partial<Furniture>) => void;
   addComponent: (kind: ComponentKind) => void;
   updateComponent: (id: string, patch: Partial<FurnitureComponent>) => void;
@@ -274,8 +281,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   surfaceMaterialId: undefined,
   selection: null,
   multi: [],
-  workbenchOpen: false,
-  draft: null,
+  // El Taller es la función principal del sistema: la app arranca con él abierto,
+  // listo para diseñar un mueble. Al cerrarlo se pasa al editor de planta.
+  workbenchOpen: true,
+  draft: makeCustomFurniture(),
   selectedComponentId: null,
   draftPast: [],
   draftFuture: [],
@@ -739,6 +748,37 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
   removeFromLibrary: (libId) =>
     set((s) => ({ customLibrary: s.customLibrary.filter((f) => f.id !== libId), dirty: true })),
+  duplicateInLibrary: (libId) =>
+    set((s) => {
+      const src = s.customLibrary.find((f) => f.id === libId);
+      if (!src) return {};
+      const copy = { ...cloneOne(src), id: uid(), name: `${src.name} (copia)`, components: src.components?.map((c) => ({ ...c, id: uid() })) };
+      return { customLibrary: [...s.customLibrary, copy], dirty: true };
+    }),
+  loadTemplate: (tplId) => {
+    const t = WORKSHOP_TEMPLATES.find((x) => x.id === tplId);
+    if (!t || !get().draft) return;
+    get().pushDraftHistory();
+    set({ draft: t.build(), selectedComponentId: null });
+  },
+  newDraft: () => {
+    if (get().draft) get().pushDraftHistory();
+    set({ workbenchOpen: true, draft: makeCustomFurniture(), selectedComponentId: null });
+  },
+  saveDraftToLibrary: () => {
+    const d = get().draft;
+    if (!d) return;
+    // Copia "de biblioteca": sin posición ni nivel. Conserva el id del borrador para
+    // que volver a guardar ACTUALICE el mismo mueble en vez de duplicarlo.
+    const item = { ...cloneOne(d), pos: { x: 0, z: 0 }, level: undefined };
+    set((s) => ({
+      customLibrary: s.customLibrary.some((f) => f.id === d.id)
+        ? s.customLibrary.map((f) => (f.id === d.id ? item : f))
+        : [...s.customLibrary, item],
+      dirty: true,
+    }));
+    get().pushToast(`"${d.name}" guardado en Mis muebles`);
+  },
   closeWorkbench: () =>
     set({ workbenchOpen: false, draft: null, selectedComponentId: null, draftPast: [], draftFuture: [] }),
   loadDraft: (f) => set({ workbenchOpen: true, draft: cloneOne(f), selectedComponentId: null, draftPast: [], draftFuture: [] }),
@@ -862,11 +902,15 @@ export const useEditor = create<EditorState>((set, get) => ({
   saveDraftToPlan: () => {
     const d = get().draft;
     if (!d) return;
-    const template = { ...cloneOne(d), id: uid(), level: undefined };
+    // Actualiza (o agrega) el mueble en la biblioteca por id — así "colocar" no duplica
+    // entradas si el mueble ya estaba guardado — y suma una instancia al plano.
+    const template = { ...cloneOne(d), pos: { x: 0, z: 0 }, level: undefined };
     const instance = { ...cloneOne(d), id: uid(), pos: { x: 0, z: 0 }, level: get().activeLevel };
     get().pushHistory();
     set((s) => ({
-      customLibrary: [...s.customLibrary, template],
+      customLibrary: s.customLibrary.some((f) => f.id === d.id)
+        ? s.customLibrary.map((f) => (f.id === d.id ? template : f))
+        : [...s.customLibrary, template],
       furniture: [...s.furniture, instance],
       selection: { kind: "furniture", id: instance.id },
       multi: [],

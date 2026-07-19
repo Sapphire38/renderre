@@ -93,6 +93,7 @@ function BoxPiece({
   selected,
   pivot,
   rotY,
+  rotX,
   cylinder,
   cylAxis,
   shape,
@@ -107,6 +108,7 @@ function BoxPiece({
   selected: boolean;
   pivot?: [number, number, number];
   rotY?: number;
+  rotX?: number;
   cylinder?: boolean;
   cylAxis?: "x" | "y" | "z";
   shape?: "sphere" | "cone" | "pyramid" | "wedge";
@@ -167,10 +169,10 @@ function BoxPiece({
     ? [(meshRot?.[0] ?? 0) + rot[0], (meshRot?.[1] ?? 0) + rot[1], (meshRot?.[2] ?? 0) + rot[2]]
     : meshRot;
 
-  if (pivot && rotY) {
+  if (pivot && (rotY || rotX)) {
     const local: [number, number, number] = [pos[0] - pivot[0], pos[1] - pivot[1], pos[2] - pivot[2]];
     return (
-      <group position={pivot} rotation={[0, rotY, 0]}>
+      <group position={pivot} rotation={[rotX ?? 0, rotY ?? 0, 0]}>
         <mesh position={local} rotation={finalRot} material={material} castShadow receiveShadow>
           {geom}
         </mesh>
@@ -307,6 +309,7 @@ function ProceduralFurniture({
             selected={selected}
             pivot={p.pivot}
             rotY={p.rotY}
+            rotX={p.rotX}
             cylinder={p.cylinder}
             cylAxis={p.cylAxis}
             shape={p.shape}
