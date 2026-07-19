@@ -7,7 +7,7 @@ import { useEditor } from "@/lib/store";
 import { carcassPanels } from "@/lib/furniture";
 import { cutList, weightOf } from "@/lib/cutlist";
 import { Piece } from "./WorkbenchPreview3D";
-import EnvSwitch, { TallerTabs } from "./EnvSwitch";
+import EnvSwitch, { TallerTabs, SaveProjectButton } from "./EnvSwitch";
 import { CabinetIcon, CopyIcon, TrashIcon } from "./icons";
 import type { Furniture } from "@/lib/types";
 
@@ -103,9 +103,12 @@ export default function FurnitureLibrary() {
           <EnvSwitch />
           <TallerTabs />
         </div>
-        <span className="hidden text-sm text-neutral-500 md:inline">
-          {library.length} {library.length === 1 ? "mueble guardado" : "muebles guardados"} en el proyecto
-        </span>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="hidden text-sm text-neutral-500 md:inline">
+            {library.length} {library.length === 1 ? "mueble guardado" : "muebles guardados"} en el proyecto
+          </span>
+          <SaveProjectButton />
+        </div>
       </header>
 
       {library.length === 0 ? (
