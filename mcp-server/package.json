@@ -1,0 +1,31 @@
+{
+  "name": "renderre-mcp",
+  "version": "1.0.0",
+  "description": "Servidor MCP para controlar Renderre (taller de muebles + planos 3D) desde Claude: diseña muebles, agrega componentes, lee el despiece y maneja el editor abierto en el navegador.",
+  "type": "module",
+  "bin": {
+    "renderre-mcp": "renderre-mcp.mjs"
+  },
+  "files": [
+    "renderre-mcp.mjs",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "modelcontextprotocol",
+    "claude",
+    "renderre",
+    "muebles",
+    "carpinteria",
+    "cad"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sapphire38/renderre.git",
+    "directory": "mcp-server"
+  },
+  "license": "MIT"
+}
