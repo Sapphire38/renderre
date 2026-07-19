@@ -660,7 +660,7 @@ async function handle(msg) {
       reply(id, {
         protocolVersion: (params && params.protocolVersion) || PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: "renderre", version: "0.1.0" },
+        serverInfo: { name: "renderre", version: "1.0.0" },
       });
       return;
     case "notifications/initialized":

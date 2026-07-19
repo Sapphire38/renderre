@@ -21,18 +21,65 @@ Claude  ──(MCP stdio)──►  renderre-mcp.mjs  ──(HTTP)──►  Nex
 - El **editor abierto** en el navegador: `http://localhost:3000/editor`.
   Si no está abierto, los comandos quedan encolados y se avisa en la respuesta.
 
+## Instalación (paquete `renderre-mcp`)
+
+El server es un paquete npm instalable (sin dependencias). Tres maneras:
+
+**A. Global desde el repo clonado** (sin publicar nada):
+
+```bash
+npm install -g ./mcp-server        # desde la raíz del repo
+renderre-mcp                        # queda el comando disponible
+```
+
+**B. Desde npm** (una vez publicado con `cd mcp-server && npm publish`):
+
+```bash
+npx -y renderre-mcp
+```
+
+**C. Directo con node** (como hasta ahora): `node mcp-server/renderre-mcp.mjs`.
+
+En todos los casos, la URL de la app se configura con la variable
+`RENDERRE_URL` (default `http://localhost:3000`). Si el sistema está
+desplegado, apuntala al dominio: `RENDERRE_URL=https://tu-dominio.com`.
+
 ## Uso con Claude Code
 
-Ya hay un `.mcp.json` en la raíz del repo. Al abrir el proyecto con Claude
+Ya hay un `.mcp.json` en la raíz del repo: al abrir el proyecto con Claude
 Code, aprobá el server `renderre` cuando lo pida. Listo.
 
-Verificá con `/mcp` que aparezca `renderre` conectado.
+Para usarlo en **cualquier otro proyecto/carpeta** (con el paquete instalado):
+
+```bash
+claude mcp add renderre --env RENDERRE_URL=http://localhost:3000 -- renderre-mcp
+# o, publicado en npm:
+claude mcp add renderre --env RENDERRE_URL=http://localhost:3000 -- npx -y renderre-mcp
+```
+
+Verificá con `/mcp` que aparezca `renderre` conectado. Después abrí el editor
+en el navegador y pedile a Claude, por ejemplo: *"abrí el taller y armame una
+cajonera de 60×90 con 4 cajones"* — los cambios se ven en vivo.
 
 ## Uso con Claude Desktop
 
 Agregá esto a `claude_desktop_config.json`
 (macOS: `~/Library/Application Support/Claude/`,
 Windows: `%APPDATA%\Claude\`) y reiniciá Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "renderre": {
+      "command": "npx",
+      "args": ["-y", "renderre-mcp"],
+      "env": { "RENDERRE_URL": "http://localhost:3000" }
+    }
+  }
+}
+```
+
+Si no está publicado en npm, usá la ruta directa:
 
 ```json
 {
@@ -47,6 +94,15 @@ Windows: `%APPDATA%\Claude\`) y reiniciá Claude Desktop:
 ```
 
 (En Windows usá doble barra: `C:\\Users\\...\\mcp-server\\renderre-mcp.mjs`.)
+
+## ¿Y con claude.ai en el navegador?
+
+Los conectores de **claude.ai** (web) no aceptan servers stdio como este:
+necesitan un **MCP remoto** (Streamable HTTP) con URL pública. El camino es
+exponer un endpoint MCP dentro de la propia app Next (p. ej. `/api/mcp/http`)
+que reutilice el mismo bridge, desplegarla, y agregar esa URL como conector
+personalizado en claude.ai (Settings → Connectors). Con Claude Code y Claude
+Desktop este server stdio alcanza y funciona hoy.
 
 ## Herramientas
 
