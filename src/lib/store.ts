@@ -207,6 +207,8 @@ export type EditorState = {
   loadPresetBase: (kind: FurnitureKind) => void;
   removeFromLibrary: (libId: string) => void;
   duplicateInLibrary: (libId: string) => void;
+  /** Importa un mueble (de un archivo .mueble.json) a "Mis muebles", con ids nuevos. */
+  importToLibrary: (f: Furniture) => void;
   /** Galería "Mis muebles" abierta (ambiente aparte del taller y del plano). */
   libraryOpen: boolean;
   /** Cambia de ambiente: taller (diseño), library (galería de muebles) o plan (plano/render).
@@ -286,11 +288,11 @@ export const useEditor = create<EditorState>((set, get) => ({
   surfaceMaterialId: undefined,
   selection: null,
   multi: [],
-  // El Taller es la función principal del sistema: la app arranca con él abierto,
-  // listo para diseñar un mueble. Con el switch de ambientes se pasa a la galería
-  // de muebles o al plano/render.
-  workbenchOpen: true,
-  libraryOpen: false,
+  // El Taller es la función principal del sistema: la app arranca en él, en la
+  // pestaña "Mis muebles" (galería). Con las pestañas se pasa a Diseño y con el
+  // switch de ambientes al plano/render.
+  workbenchOpen: false,
+  libraryOpen: true,
   draft: makeCustomFurniture(),
   selectedComponentId: null,
   draftPast: [],
@@ -775,6 +777,18 @@ export const useEditor = create<EditorState>((set, get) => ({
       const copy = { ...cloneOne(src), id: uid(), name: `${src.name} (copia)`, components: src.components?.map((c) => ({ ...c, id: uid() })) };
       return { customLibrary: [...s.customLibrary, copy], dirty: true };
     }),
+  importToLibrary: (f) => {
+    const item: Furniture = {
+      ...cloneOne(f),
+      id: uid(),
+      kind: "custom",
+      pos: { x: 0, z: 0 },
+      level: undefined,
+      components: (f.components ?? []).map((c) => ({ ...c, id: uid() })),
+    };
+    set((s) => ({ customLibrary: [...s.customLibrary, item], dirty: true }));
+    get().pushToast(`"${item.name}" importado a Mis muebles`, "ok");
+  },
   loadTemplate: (tplId) => {
     const t = WORKSHOP_TEMPLATES.find((x) => x.id === tplId);
     if (!t || !get().draft) return;
@@ -1142,6 +1156,42 @@ export const useEditor = create<EditorState>((set, get) => ({
       dirty: false,
     }),
 }));
+
+// ------------------- Autoguardado del taller en localStorage -------------------
+// El mueble en edición y "Mis muebles" se respaldan solos: al recargar la página
+// no se pierde nada aunque no hayas guardado el proyecto. (El proyecto completo
+// se sigue guardando aparte con "Guardar", en renderre.projects.v1.)
+const TALLER_KEY = "renderre.taller.v1";
+if (typeof window !== "undefined") {
+  try {
+    const raw = window.localStorage.getItem(TALLER_KEY);
+    if (raw) {
+      const j = JSON.parse(raw) as { draft?: Furniture | null; customLibrary?: Furniture[] };
+      const patch: Partial<EditorState> = {};
+      if (Array.isArray(j.customLibrary) && j.customLibrary.length) patch.customLibrary = cloneFurniture(j.customLibrary);
+      if (j.draft && typeof j.draft.width === "number") patch.draft = cloneOne(j.draft);
+      if (Object.keys(patch).length) useEditor.setState(patch);
+    }
+  } catch {
+    // storage corrupto o deshabilitado: se arranca limpio
+  }
+  let talleTimer: ReturnType<typeof setTimeout> | undefined;
+  useEditor.subscribe((s, prev) => {
+    if (s.draft === prev.draft && s.customLibrary === prev.customLibrary) return;
+    clearTimeout(talleTimer);
+    talleTimer = setTimeout(() => {
+      try {
+        const st = useEditor.getState();
+        window.localStorage.setItem(
+          TALLER_KEY,
+          JSON.stringify({ draft: st.draft, customLibrary: st.customLibrary, updatedAt: Date.now() }),
+        );
+      } catch {
+        // cuota llena o storage deshabilitado: lo dejamos pasar
+      }
+    }, 400);
+  });
+}
 
 // Hook de depuración (solo dev): permite inspeccionar el estado desde la consola.
 if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {

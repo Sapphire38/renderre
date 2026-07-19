@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Grid, OrbitControls } from "@react-three/drei";
 import { useEditor } from "@/lib/store";
@@ -75,12 +75,59 @@ export default function FurnitureLibrary() {
   const duplicateInLibrary = useEditor((s) => s.duplicateInLibrary);
   const removeFromLibrary = useEditor((s) => s.removeFromLibrary);
   const placeCustom = useEditor((s) => s.placeCustom);
+  const importToLibrary = useEditor((s) => s.importToLibrary);
   const setView = useEditor((s) => s.setView);
   const pushToast = useEditor((s) => s.pushToast);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openAll, setOpenAll] = useState(0);
   const [turntable, setTurntable] = useState(true);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Exporta el mueble seleccionado como archivo .mueble.json (compartible entre proyectos).
+  const exportFurniture = (f: Furniture) => {
+    const blob = new Blob(
+      [JSON.stringify({ app: "renderre", kind: "mueble", version: 1, mueble: f }, null, 2)],
+      { type: "application/json" },
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(f.name || "mueble").trim().replace(/[^\w\-]+/g, "_")}.mueble.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Importa uno o varios muebles desde archivos .mueble.json (o un proyecto con customLibrary).
+  const onImportFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    let n = 0;
+    for (const file of Array.from(files)) {
+      try {
+        const obj = JSON.parse(await file.text()) as Record<string, unknown>;
+        const candidates: unknown[] = Array.isArray(obj)
+          ? obj
+          : obj?.mueble
+            ? [obj.mueble]
+            : Array.isArray(obj?.muebles)
+              ? (obj.muebles as unknown[])
+              : Array.isArray((obj?.data as Record<string, unknown>)?.customLibrary)
+                ? ((obj.data as Record<string, unknown>).customLibrary as unknown[])
+                : [obj];
+        for (const c of candidates) {
+          const f = c as Furniture;
+          if (f && typeof f.width === "number" && typeof f.height === "number" && typeof f.depth === "number") {
+            importToLibrary({ ...f, name: f.name || "Mueble importado" });
+            n++;
+          }
+        }
+      } catch {
+        pushToast(`No pude leer "${file.name}" (¿es un .mueble.json válido?)`, "warn");
+      }
+    }
+    if (!n) pushToast("El archivo no tiene muebles válidos", "warn");
+    if (fileRef.current) fileRef.current.value = "";
+  };
 
   // Selección estable: si el elegido desaparece (o no hay), cae al primero.
   const sel = library.find((f) => f.id === selectedId) ?? library[0] ?? null;
@@ -103,10 +150,26 @@ export default function FurnitureLibrary() {
           <EnvSwitch />
           <TallerTabs />
         </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <span className="hidden text-sm text-neutral-500 md:inline">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <span className="hidden text-sm text-neutral-500 lg:inline">
             {library.length} {library.length === 1 ? "mueble guardado" : "muebles guardados"} en el proyecto
           </span>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".json,application/json"
+            multiple
+            className="hidden"
+            onChange={(e) => onImportFiles(e.target.files)}
+          />
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            title="Importar muebles desde archivos .mueble.json"
+            className="flex items-center gap-1.5 rounded-md border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-200 hover:border-sky-500 hover:bg-neutral-800"
+          >
+            ⤒ <span className="hidden sm:inline">Importar</span>
+          </button>
           <SaveProjectButton />
         </div>
       </header>
@@ -118,13 +181,22 @@ export default function FurnitureLibrary() {
             Todavía no hay muebles guardados. Diseñá uno en el taller y usá{" "}
             <b className="text-neutral-200">Guardar mueble</b>: va a aparecer acá para previsualizarlo y editarlo.
           </p>
-          <button
-            type="button"
-            onClick={() => setView("taller")}
-            className="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500"
-          >
-            Ir al taller
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setView("taller")}
+              className="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500"
+            >
+              Ir al taller
+            </button>
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="rounded-md border border-neutral-700 px-4 py-2 text-sm text-neutral-200 hover:border-sky-500 hover:bg-neutral-800"
+            >
+              ⤒ Importar mueble
+            </button>
+          </div>
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
@@ -202,6 +274,14 @@ export default function FurnitureLibrary() {
 
               {/* Acciones */}
               <div className="absolute bottom-3 right-3 flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => exportFurniture(sel)}
+                  title="Descargar este mueble como archivo .mueble.json (para compartir o llevar a otro proyecto)"
+                  className={actionBtn}
+                >
+                  ⤓ Exportar
+                </button>
                 <button
                   type="button"
                   onClick={() => duplicateInLibrary(sel.id)}
