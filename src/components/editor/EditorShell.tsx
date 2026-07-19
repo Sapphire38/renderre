@@ -11,6 +11,7 @@ import WallBar from "./WallBar";
 import SurfaceBar from "./SurfaceBar";
 import FloorBar from "./FloorBar";
 import FurnitureWorkbench from "./FurnitureWorkbench";
+import FurnitureLibrary from "./FurnitureLibrary";
 import TerrainEditor from "./TerrainEditor";
 import Viewport3D from "./Viewport3D";
 import ThreeTabSync from "./ThreeTabSync";
@@ -97,6 +98,7 @@ export default function EditorShell() {
         </aside>
       </div>
       <FurnitureWorkbench />
+      <FurnitureLibrary />
       <Toasts />
       <ThreeTabSync />
       <McpBridge />

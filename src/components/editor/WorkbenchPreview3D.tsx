@@ -17,7 +17,7 @@ function shade(hex: string, amt: number): string {
   return `rgb(${r},${g},${b})`;
 }
 
-function Piece({ panel, baseColor, materials }: { panel: Panel & { offset?: [number, number, number] }; baseColor: string; materials: Material[] }) {
+export function Piece({ panel, baseColor, materials }: { panel: Panel & { offset?: [number, number, number] }; baseColor: string; materials: Material[] }) {
   const { pos, size, cylinder, cylAxis, shape, pivot, rotY, rotX, rot, door } = panel;
   const matColor = panel.materialId ? materials.find((m) => m.id === panel.materialId)?.color : undefined;
   const color = matColor ?? panel.color ?? (door ? shade(baseColor, -0.06) : baseColor);

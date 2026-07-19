@@ -10,6 +10,7 @@ import {
 } from "@/lib/storage";
 import { SCHEMA_VERSION, type ProjectData, type SavedProject } from "@/lib/types";
 import { PlusIcon, SaveIcon, FolderIcon, TrashIcon, ChevronDownIcon, CabinetIcon, DownloadIcon, UploadIcon } from "./icons";
+import EnvSwitch from "./EnvSwitch";
 
 function fmtDate(ts: number): string {
   try {
@@ -32,7 +33,7 @@ export default function ProjectBar() {
   const loadData = useEditor((s) => s.loadData);
   const newProject = useEditor((s) => s.newProject);
   const markSaved = useEditor((s) => s.markSaved);
-  const openWorkbench = useEditor((s) => s.openWorkbench);
+  const setView = useEditor((s) => s.setView);
   const pushToast = useEditor((s) => s.pushToast);
 
   const [open, setOpen] = useState(false);
@@ -257,6 +258,10 @@ export default function ProjectBar() {
 
       <div className="mx-1 hidden h-6 w-px bg-neutral-800 sm:block" />
 
+      <EnvSwitch />
+
+      <div className="mx-1 hidden h-6 w-px bg-neutral-800 sm:block" />
+
       <div className="flex min-w-0 flex-1 items-center gap-2 lg:flex-none">
         <input
           value={projectName}
@@ -274,15 +279,6 @@ export default function ProjectBar() {
 
       {/* Acciones completas: solo escritorio (lg+). */}
       <div className="hidden items-center gap-1 lg:flex">
-        <button
-          type="button"
-          onClick={() => openWorkbench()}
-          title="Crear un mueble en el taller (función principal)"
-          className="flex items-center gap-1.5 rounded-md border border-sky-700/60 bg-sky-500/10 px-2.5 py-1.5 text-sm font-medium text-sky-300 hover:bg-sky-500/20"
-        >
-          <CabinetIcon width={16} height={16} /> Taller
-        </button>
-
         <button
           type="button"
           onClick={onNew}
@@ -349,7 +345,7 @@ export default function ProjectBar() {
         </button>
         {mobileMenuOpen && (
           <div className="absolute right-0 top-full z-40 mt-1 max-h-[75vh] w-64 overflow-auto rounded-lg border border-neutral-800 bg-neutral-900 p-1 shadow-xl">
-            <button type="button" onClick={() => { openWorkbench(); setMobileMenuOpen(false); }} className={`${mobileRow} text-sky-300`}>
+            <button type="button" onClick={() => { setView("taller"); setMobileMenuOpen(false); }} className={`${mobileRow} text-sky-300`}>
               <CabinetIcon width={17} height={17} /> Taller de muebles
             </button>
             <button type="button" onClick={() => { onNew(); setMobileMenuOpen(false); }} className={mobileRow}>
