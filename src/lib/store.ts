@@ -207,6 +207,11 @@ export type EditorState = {
   loadPresetBase: (kind: FurnitureKind) => void;
   removeFromLibrary: (libId: string) => void;
   duplicateInLibrary: (libId: string) => void;
+  /** Galería "Mis muebles" abierta (ambiente aparte del taller y del plano). */
+  libraryOpen: boolean;
+  /** Cambia de ambiente: taller (diseño), library (galería de muebles) o plan (plano/render).
+   *  Al salir del taller el borrador se CONSERVA para poder volver. */
+  setView: (v: "taller" | "library" | "plan") => void;
   closeWorkbench: () => void;
   loadDraft: (f: Furniture) => void;
   /** Reemplaza el borrador por una plantilla del taller (cajonera, placard, etc.). */
@@ -282,8 +287,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   selection: null,
   multi: [],
   // El Taller es la función principal del sistema: la app arranca con él abierto,
-  // listo para diseñar un mueble. Al cerrarlo se pasa al editor de planta.
+  // listo para diseñar un mueble. Con el switch de ambientes se pasa a la galería
+  // de muebles o al plano/render.
   workbenchOpen: true,
+  libraryOpen: false,
   draft: makeCustomFurniture(),
   selectedComponentId: null,
   draftPast: [],
@@ -728,6 +735,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   openWorkbench: (base) =>
     set({
       workbenchOpen: true,
+      libraryOpen: false,
       draft: base ? { ...cloneOne(base), kind: "custom" } : makeCustomFurniture(),
       selectedComponentId: null,
       draftPast: [],
@@ -736,11 +744,23 @@ export const useEditor = create<EditorState>((set, get) => ({
   openWorkbenchFromPreset: (kind) =>
     set({
       workbenchOpen: true,
+      libraryOpen: false,
       draft: customFromPreset(kind),
       selectedComponentId: null,
       draftPast: [],
       draftFuture: [],
     }),
+  setView: (v) => {
+    const s = get();
+    if (v === "taller") {
+      // Vuelve al taller conservando el borrador en curso (o arranca uno nuevo).
+      set({ workbenchOpen: true, libraryOpen: false, draft: s.draft ?? makeCustomFurniture() });
+    } else if (v === "library") {
+      set({ workbenchOpen: false, libraryOpen: true });
+    } else {
+      set({ workbenchOpen: false, libraryOpen: false });
+    }
+  },
   loadPresetBase: (kind) => {
     if (!get().draft) return;
     get().pushDraftHistory();
@@ -780,8 +800,8 @@ export const useEditor = create<EditorState>((set, get) => ({
     get().pushToast(`"${d.name}" guardado en Mis muebles`);
   },
   closeWorkbench: () =>
-    set({ workbenchOpen: false, draft: null, selectedComponentId: null, draftPast: [], draftFuture: [] }),
-  loadDraft: (f) => set({ workbenchOpen: true, draft: cloneOne(f), selectedComponentId: null, draftPast: [], draftFuture: [] }),
+    set({ workbenchOpen: false, libraryOpen: false, draft: null, selectedComponentId: null, draftPast: [], draftFuture: [] }),
+  loadDraft: (f) => set({ workbenchOpen: true, libraryOpen: false, draft: cloneOne(f), selectedComponentId: null, draftPast: [], draftFuture: [] }),
   updateDraft: (patch) => set((s) => (s.draft ? { draft: { ...s.draft, ...patch } } : {})),
   addComponent: (kind) =>
     set((s) => {
@@ -915,6 +935,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       selection: { kind: "furniture", id: instance.id },
       multi: [],
       workbenchOpen: false,
+      libraryOpen: false,
       draft: null,
       selectedComponentId: null,
       draftPast: [],
@@ -1065,6 +1086,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       selection: null,
       multi: [],
       workbenchOpen: false,
+      libraryOpen: false,
       draft: null,
       selectedComponentId: null,
       past: [],
@@ -1111,6 +1133,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       selection: null,
       multi: [],
       workbenchOpen: false,
+      libraryOpen: false,
       draft: null,
       selectedComponentId: null,
       projectName: "Proyecto sin título",

@@ -6,13 +6,14 @@ import FrontElevationEditor from "./FrontElevationEditor";
 import WorkbenchControls from "./WorkbenchControls";
 import WorkbenchPreview3D from "./WorkbenchPreview3D";
 import WorkbenchCutList from "./WorkbenchCutList";
+import EnvSwitch from "./EnvSwitch";
 import { CloseIcon, CabinetIcon, UndoIcon, RedoIcon, RulerIcon } from "./icons";
 import { isTypingTarget } from "@/lib/dom";
 
 export default function FurnitureWorkbench() {
   const open = useEditor((s) => s.workbenchOpen);
   const draft = useEditor((s) => s.draft);
-  const close = useEditor((s) => s.closeWorkbench);
+  const setView = useEditor((s) => s.setView);
   const showDims = useEditor((s) => s.workbenchDims);
   const toggleDims = useEditor((s) => s.toggleWorkbenchDims);
   const undoDraft = useEditor((s) => s.undoDraft);
@@ -81,8 +82,9 @@ export default function FurnitureWorkbench() {
         return;
       }
       if (e.key === "Escape") {
+        // Cambia al plano conservando el borrador (se vuelve con el switch de ambientes).
         e.preventDefault();
-        st.closeWorkbench();
+        st.setView("plan");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -96,11 +98,11 @@ export default function FurnitureWorkbench() {
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-neutral-950 text-neutral-200">
       <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-neutral-800 px-3 sm:px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <CabinetIcon width={18} height={18} className="shrink-0 text-sky-400" />
-          <span className="text-sm font-semibold">Taller</span>
-          <span className="hidden text-neutral-600 sm:inline">·</span>
-          <span className="hidden truncate text-sm text-neutral-400 sm:inline">{draft.name}</span>
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <CabinetIcon width={18} height={18} className="hidden shrink-0 text-sky-400 sm:block" />
+          <EnvSwitch />
+          <span className="hidden text-neutral-600 md:inline">·</span>
+          <span className="hidden truncate text-sm text-neutral-400 md:inline">{draft.name}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <button type="button" onClick={undoDraft} disabled={!canUndo} title="Deshacer (Ctrl+Z)" className={toolBtn}>
@@ -133,8 +135,8 @@ export default function FurnitureWorkbench() {
           </button>
           <button
             type="button"
-            onClick={close}
-            title="Cerrar (Esc)"
+            onClick={() => setView("plan")}
+            title="Ir al plano (Esc) — el mueble en edición se conserva"
             className="ml-1 grid h-8 w-8 place-items-center rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
           >
             <CloseIcon />
