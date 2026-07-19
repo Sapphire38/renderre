@@ -72,7 +72,7 @@ const FURNITURE_KINDS = [
   "kitchen-island", "corner-cabinet", "double-sink", "towel-rack", "medicine-cabinet", "wine-rack", "bar",
   "tent", "kayak", "campfire", "cooler", "boat", "van", "truck", "scooter",
 ];
-const COMPONENT_KINDS = ["shelf", "drawer", "doorHinged", "doorSliding", "doorFlap", "divider", "board", "rod"];
+const COMPONENT_KINDS = ["shelf", "drawer", "doorHinged", "doorSliding", "doorFlap", "cleat", "divider", "board", "rod"];
 const WALL_KINDS = ["solid", "brick", "stone", "block", "glass", "hedge", "fence", "railing", "picket"];
 const SURFACE_SHAPES = ["rect", "circle"];
 // props comunes de un componente del taller (cm/m en metros, x desde izq, y desde abajo)

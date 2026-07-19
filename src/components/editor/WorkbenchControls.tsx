@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useEditor } from "@/lib/store";
-import { FURNITURE_PRESETS } from "@/lib/furniture";
+import { FURNITURE_PRESETS, WORKSHOP_TEMPLATES } from "@/lib/furniture";
 import { uid } from "@/lib/geometry";
 import type { ComponentKind, FurnitureComponent } from "@/lib/types";
 import { TrashIcon, CopyIcon } from "./icons";
@@ -70,6 +70,7 @@ const ADD_BUTTONS: { kind: ComponentKind; label: string }[] = [
   { kind: "divider", label: "División" },
   { kind: "board", label: "Placa" },
   { kind: "rod", label: "Barral" },
+  { kind: "cleat", label: "Listón francés" },
 ];
 
 function CompProps({ c }: { c: FurnitureComponent }) {
@@ -160,7 +161,7 @@ function CompProps({ c }: { c: FurnitureComponent }) {
         const shaped = c.kind === "board" && !!c.shape && c.shape !== "box";
         const isFrontBoard = c.kind === "board" && orient === "front" && !shaped;
         const showDepth =
-          c.kind === "shelf" || c.kind === "divider" || c.kind === "drawer" || (c.kind === "board" && (orient !== "front" || shaped));
+          c.kind === "shelf" || c.kind === "divider" || c.kind === "drawer" || c.kind === "cleat" || (c.kind === "board" && (orient !== "front" || shaped));
         const showInset = c.kind === "shelf" || c.kind === "divider" || c.kind === "board";
         const defaultDepth =
           c.kind === "drawer"
@@ -428,10 +429,14 @@ export default function WorkbenchControls() {
   const updateDraft = useEditor((s) => s.updateDraft);
   const addComponent = useEditor((s) => s.addComponent);
   const save = useEditor((s) => s.saveDraftToPlan);
-  const close = useEditor((s) => s.closeWorkbench);
+  const saveToLibrary = useEditor((s) => s.saveDraftToLibrary);
+  const newDraft = useEditor((s) => s.newDraft);
   const loadPresetBase = useEditor((s) => s.loadPresetBase);
+  const loadTemplate = useEditor((s) => s.loadTemplate);
   const loadDraft = useEditor((s) => s.loadDraft);
   const customLibrary = useEditor((s) => s.customLibrary);
+  const duplicateInLibrary = useEditor((s) => s.duplicateInLibrary);
+  const removeFromLibrary = useEditor((s) => s.removeFromLibrary);
 
   if (!draft) return null;
   const sel = (draft.components ?? []).find((c) => c.id === selectedId) ?? null;
@@ -443,6 +448,24 @@ export default function WorkbenchControls() {
         <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
           Empezar desde una base
         </h3>
+        <label className="flex items-center justify-between gap-2 py-1">
+          <span className="text-neutral-400">Plantilla</span>
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value) loadTemplate(e.target.value);
+              e.currentTarget.selectedIndex = 0;
+            }}
+            className="w-44 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-sky-600"
+          >
+            <option value="">Elegir variante…</option>
+            {WORKSHOP_TEMPLATES.map((t) => (
+              <option key={t.id} value={t.id} title={t.hint}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="flex items-center justify-between gap-2 py-1">
           <span className="text-neutral-400">Preset</span>
           <select
@@ -461,29 +484,58 @@ export default function WorkbenchControls() {
             ))}
           </select>
         </label>
-        <label className="flex items-center justify-between gap-2 py-1">
-          <span className="text-neutral-400">Mis muebles</span>
-          <select
-            value=""
-            onChange={(e) => {
-              const f = customLibrary.find((x) => x.id === e.target.value);
-              if (f) loadDraft(f);
-              e.currentTarget.selectedIndex = 0;
-            }}
-            disabled={customLibrary.length === 0}
-            className="w-44 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-sky-600 disabled:opacity-50"
-          >
-            <option value="">{customLibrary.length ? "Cargar uno…" : "(ninguno guardado)"}</option>
-            {customLibrary.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
-        </label>
         <p className="mt-1 text-[11px] leading-snug text-neutral-600">
           Reemplaza lo que estés editando (podés deshacer con Ctrl+Z).
         </p>
+      </div>
+
+      {/* Biblioteca del taller: los muebles viven acá, aislados del plano. */}
+      <div className="border-b border-neutral-800 px-4 py-3">
+        <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
+          Mis muebles ({customLibrary.length})
+        </h3>
+        {customLibrary.length === 0 ? (
+          <p className="text-[11px] leading-snug text-neutral-600">
+            Todavía no guardaste ninguno. Usá <b className="text-neutral-400">Guardar mueble</b> abajo: queda en el
+            proyecto sin necesidad de colocarlo en el plano.
+          </p>
+        ) : (
+          <ul className="max-h-44 space-y-1 overflow-y-auto pr-1">
+            {customLibrary.map((f) => (
+              <li key={f.id} className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => loadDraft(f)}
+                  title={`Abrir "${f.name}" en el taller (${Math.round(f.width * 100)}×${Math.round(f.height * 100)}×${Math.round(f.depth * 100)} cm)`}
+                  className={[
+                    "min-w-0 flex-1 truncate rounded-md border px-2 py-1 text-left text-sm",
+                    f.id === draft.id
+                      ? "border-sky-700/60 bg-sky-500/10 text-sky-200"
+                      : "border-neutral-800 text-neutral-200 hover:border-sky-600 hover:bg-neutral-800",
+                  ].join(" ")}
+                >
+                  {f.name}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => duplicateInLibrary(f.id)}
+                  title="Duplicar"
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+                >
+                  <CopyIcon width={14} height={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeFromLibrary(f.id)}
+                  title="Eliminar de la biblioteca"
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded text-neutral-500 hover:bg-red-950/50 hover:text-red-300"
+                >
+                  <TrashIcon width={14} height={14} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className="border-b border-neutral-800 px-4 py-3">
@@ -511,6 +563,32 @@ export default function WorkbenchControls() {
           <span className={draft.carcass === false ? "text-neutral-600" : "text-neutral-400"}>Fondo</span>
           <input type="checkbox" checked={draft.back !== false} disabled={draft.carcass === false} onFocus={beginEdit} onChange={(e) => updateDraft({ back: e.target.checked })} className="h-4 w-4 accent-sky-500 disabled:opacity-40" />
         </div>
+        {draft.carcass !== false && draft.back !== false && (
+          <>
+            <Num
+              label="Espesor fondo"
+              value={mm(draft.backThickness ?? draft.panel)}
+              unit="mm"
+              min={3}
+              max={50}
+              step={0.1}
+              onChange={(v) => updateDraft({ backThickness: clamp(v / 1000, 0.003, 0.05) })}
+            />
+            <Num
+              label="Retiro fondo"
+              value={mm(draft.backInset ?? 0)}
+              unit="mm"
+              min={0}
+              max={mm(draft.depth / 2)}
+              step={1}
+              onChange={(v) => updateDraft({ backInset: clamp(v / 1000, 0, draft.depth / 2) })}
+            />
+            <p className="-mt-0.5 pb-1 text-[10px] leading-snug text-neutral-600">
+              Fondo típico: 3 mm. Con retiro de 18–20 mm queda el hueco para colgar el mueble con
+              listón francés embutido (agregalo como componente).
+            </p>
+          </>
+        )}
         <div className="flex items-center justify-between gap-2 py-1">
           <span className="text-neutral-400">Color</span>
           <input
@@ -549,20 +627,32 @@ export default function WorkbenchControls() {
         </div>
       )}
 
-      <div className="mt-auto flex gap-2 border-t border-neutral-800 p-3">
-        <button
-          type="button"
-          onClick={close}
-          className="flex-1 rounded-md border border-neutral-700 py-2 text-sm text-neutral-300 hover:bg-neutral-800"
-        >
-          Cancelar
-        </button>
+      <div className="mt-auto space-y-2 border-t border-neutral-800 p-3">
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={newDraft}
+            title="Empezar un mueble nuevo en blanco (lo actual se puede recuperar con Ctrl+Z si no lo guardaste)"
+            className="flex-1 rounded-md border border-neutral-700 py-2 text-sm text-neutral-300 hover:bg-neutral-800"
+          >
+            + Nuevo
+          </button>
+          <button
+            type="button"
+            onClick={saveToLibrary}
+            title="Guardar/actualizar en Mis muebles sin colocarlo en el plano"
+            className="flex-1 rounded-md bg-sky-600 py-2 text-sm font-medium text-white hover:bg-sky-500"
+          >
+            Guardar mueble
+          </button>
+        </div>
         <button
           type="button"
           onClick={save}
-          className="flex-1 rounded-md bg-sky-600 py-2 text-sm font-medium text-white hover:bg-sky-500"
+          title="Guardar en Mis muebles y colocar una copia en el plano del proyecto"
+          className="w-full rounded-md border border-sky-700/60 bg-sky-500/10 py-2 text-sm font-medium text-sky-300 hover:bg-sky-500/20"
         >
-          Guardar y colocar
+          Colocar en el plano ↗
         </button>
       </div>
     </div>

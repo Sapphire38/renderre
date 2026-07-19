@@ -284,6 +284,7 @@ export type ComponentKind =
   | "doorHinged" // puerta batiente
   | "doorSliding" // puerta corrediza
   | "doorFlap" // tapa de apertura vertical (rebatible hacia arriba o abajo)
+  | "cleat" // listón francés (fijación a muro, tira ripada a 45°)
   | "divider" // división vertical
   | "board" // placa libre
   | "rod"; // barral
@@ -338,6 +339,11 @@ export type Furniture = {
   /** Solo kind === "custom": componentes del mueble armado en el taller. */
   components?: FurnitureComponent[];
   back?: boolean; // tiene panel de fondo (custom). default true
+  /** Espesor propio del fondo (m). Si falta usa `panel`. Típico 3 mm (fibrofácil) en muebles livianos. */
+  backThickness?: number;
+  /** Retiro del fondo desde la cara trasera (m). Default 0 (a tope). Con 18–20 mm queda el hueco
+   *  para embutir un sistema de fijación francés (listón a 45°) oculto contra la pared. */
+  backInset?: number;
   /** custom: dibujar la carcasa/caja (laterales+piso+techo+fondo). default true. false = solo componentes (formas libres, ej. una escalera). */
   carcass?: boolean;
   /** Modelo 3D externo (.glb/glTF): data URL o ruta. Si está, se renderiza el modelo (fit a width×depth) con fallback a caja. */

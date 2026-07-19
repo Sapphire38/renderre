@@ -411,6 +411,9 @@ export function makeComponent(kind: ComponentKind, f: Furniture): FurnitureCompo
     }
     case "divider":
       return { id, kind, x: W / 2 - t / 2, y: t, w: t, h: inH };
+    case "cleat":
+      // Listón francés: tira horizontal (ripada a 45°) en la franja superior trasera.
+      return { id, kind, x: t, y: Math.max(t, H - t - 0.12), w: inW, h: 0.08 };
     case "rod":
       return { id, kind, x: t, y: H * 0.85, w: inW, h: 0.03 };
     case "board":
@@ -435,7 +438,13 @@ export function buildCustomPanels(f: Furniture): Panel[] {
     panels.push({ pos: [W / 2 - t / 2, base + H / 2, 0], size: [t, H, D], role: "Lateral", edges: { front: true } });
     panels.push({ pos: [0, base + t / 2, 0], size: [inW, t, D], role: "Piso", edges: { front: true } });
     panels.push({ pos: [0, base + H - t / 2, 0], size: [inW, t, D], role: "Techo", edges: { front: true } });
-    if (f.back !== false) panels.push({ pos: [0, base + H / 2, D / 2 - t / 2], size: [inW, H - 2 * t, t], role: "Fondo" });
+    if (f.back !== false) {
+      // Fondo con espesor propio (típico 3 mm) y retiro desde atrás: con 18–20 mm de
+      // retiro queda el hueco para embutir un listón francés oculto contra la pared.
+      const bt = Math.min(f.backThickness ?? t, D / 2);
+      const bi = Math.min(Math.max(f.backInset ?? 0, 0), Math.max(0, D - bt - 0.01));
+      panels.push({ pos: [0, base + H / 2, D / 2 - bi - bt / 2], size: [inW, H - 2 * t, bt], role: "Fondo" });
+    }
   }
 
   const cx = (x: number, w: number) => -W / 2 + x + w / 2;
@@ -472,6 +481,18 @@ export function buildCustomPanels(f: Furniture): Panel[] {
     } else if (c.kind === "divider") {
       const d = depthZ(c);
       panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), d.zc], size: [Math.max(c.w, ct), c.h, d.zs], color: col, materialId: mat, role: "División", edges: { front: true } });
+    } else if (c.kind === "cleat") {
+      // Listón francés: tira pegada a la cara trasera del mueble (dentro del retiro del
+      // fondo si lo hay). Se corta ripado a 45° — el ángulo va como nota en el despiece.
+      const clT = cl(c.depth ?? Math.max(ct, 0.018), 0.009, D / 2);
+      panels.push({
+        pos: [cx(c.x, c.w), cyTop(c.y, c.h), D / 2 - clT / 2],
+        size: [c.w, c.h, clT],
+        color: col ?? "#a89170",
+        materialId: mat,
+        role: "Listón francés (45°)",
+        edges: { front: true },
+      });
     } else if (c.kind === "rod") {
       panels.push({ pos: [cx(c.x, c.w), base + c.y, 0], size: [c.w, 0.03, 0.03], cylinder: true, color: col ?? "#9aa3ad" });
     } else if (c.kind === "board") {
@@ -589,6 +610,128 @@ export function buildCustomPanels(f: Furniture): Panel[] {
   }
   return panels;
 }
+
+// ===================== Plantillas del taller (variantes de mueble) =====================
+
+export type WorkshopTemplate = { id: string; name: string; hint: string; build: () => Furniture };
+
+/** Base común para las plantillas: mueble custom con medidas y componentes dados. */
+function tpl(
+  name: string,
+  dims: Partial<Furniture>,
+  comps: (f: Furniture) => Omit<FurnitureComponent, "id">[],
+): Furniture {
+  const f: Furniture = { ...makeCustomFurniture(), ...dims, id: uid(), name };
+  f.components = comps(f).map((c) => ({ ...c, id: uid() }));
+  return f;
+}
+
+/**
+ * Variantes típicas de carpintería, listas para ajustar medidas. Cada una arma un
+ * mueble completo (carcasa + componentes) que después se edita libremente.
+ */
+export const WORKSHOP_TEMPLATES: WorkshopTemplate[] = [
+  {
+    id: "cajonera",
+    name: "Cajonera (4 cajones)",
+    hint: "Módulo de cajones parejos con correderas",
+    build: () =>
+      tpl("Cajonera", { width: 0.6, depth: 0.5, height: 0.9 }, (f) => [
+        { kind: "drawer", x: f.panel, y: f.panel, w: f.width - 2 * f.panel, h: f.height - 2 * f.panel, count: 4, open: 0 },
+      ]),
+  },
+  {
+    id: "alacena-rebatible",
+    name: "Alacena rebatible (tapa arriba)",
+    hint: "Tapa vertical con brazos hidráulicos, colgada",
+    build: () =>
+      tpl("Alacena rebatible", { width: 0.9, depth: 0.35, height: 0.42, baseHeight: 1.45, backThickness: 0.003, backInset: 0.02 }, (f) => [
+        { kind: "cleat", x: f.panel, y: f.height - f.panel - 0.1, w: f.width - 2 * f.panel, h: 0.08 },
+        { kind: "doorFlap", x: f.panel, y: f.panel, w: f.width - 2 * f.panel, h: f.height - 2 * f.panel, flapDir: "up", pistons: true, open: 0 },
+      ]),
+  },
+  {
+    id: "mueble-bar",
+    name: "Mueble bar (tapa abajo)",
+    hint: "Tapa rebatible hacia abajo que hace de mesada",
+    build: () =>
+      tpl("Mueble bar", { width: 0.8, depth: 0.4, height: 1.1 }, (f) => {
+        const t = f.panel;
+        const inW = f.width - 2 * t;
+        return [
+          { kind: "shelf", x: t, y: f.height * 0.55, w: inW, h: t },
+          { kind: "doorFlap", x: t, y: f.height * 0.55 + t, w: inW, h: f.height - t - (f.height * 0.55 + t), flapDir: "down", open: 0 },
+          { kind: "doorHinged", x: t, y: t, w: inW / 2, h: f.height * 0.55 - t, hinge: "left", open: 0 },
+          { kind: "doorHinged", x: t + inW / 2, y: t, w: inW / 2, h: f.height * 0.55 - t, hinge: "right", open: 0 },
+        ];
+      }),
+  },
+  {
+    id: "placard",
+    name: "Placard 2 puertas + barral",
+    hint: "Interior con barral, estante superior y cajonera",
+    build: () =>
+      tpl("Placard", { width: 1.2, depth: 0.6, height: 2.2 }, (f) => {
+        const t = f.panel;
+        const inW = f.width - 2 * t;
+        return [
+          { kind: "shelf", x: t, y: f.height - t - 0.35, w: inW, h: t },
+          { kind: "rod", x: t, y: f.height - t - 0.45, w: inW, h: 0.03 },
+          { kind: "drawer", x: t, y: t, w: inW, h: 0.6, count: 3, open: 0 },
+          { kind: "doorHinged", x: t, y: t, w: inW / 2, h: f.height - 2 * t, hinge: "left", open: 0 },
+          { kind: "doorHinged", x: t + inW / 2, y: t, w: inW / 2, h: f.height - 2 * t, hinge: "right", open: 0 },
+        ];
+      }),
+  },
+  {
+    id: "rack-flotante",
+    name: "Rack TV flotante (francés)",
+    hint: "Colgado con listón francés embutido, fondo retirado",
+    build: () =>
+      tpl("Rack TV flotante", { width: 1.6, depth: 0.35, height: 0.4, baseHeight: 0.45, backThickness: 0.003, backInset: 0.02 }, (f) => {
+        const t = f.panel;
+        const inW = f.width - 2 * t;
+        return [
+          { kind: "cleat", x: t, y: f.height - t - 0.1, w: inW, h: 0.08 },
+          { kind: "drawer", x: t, y: t, w: inW / 2 - 0.0015, h: f.height - 2 * t, count: 1, open: 0 },
+          { kind: "drawer", x: t + inW / 2 + 0.0015, y: t, w: inW / 2 - 0.0015, h: f.height - 2 * t, count: 1, open: 0 },
+        ];
+      }),
+  },
+  {
+    id: "biblioteca",
+    name: "Biblioteca abierta",
+    hint: "Estantes parejos, fondo de 3 mm",
+    build: () =>
+      tpl("Biblioteca", { width: 0.9, depth: 0.3, height: 1.8, backThickness: 0.003 }, (f) => {
+        const t = f.panel;
+        const inW = f.width - 2 * t;
+        const inH = f.height - 2 * t;
+        const n = 4;
+        return Array.from({ length: n }, (_, i) => ({
+          kind: "shelf" as const,
+          x: t,
+          y: t + (inH * (i + 1)) / (n + 1),
+          w: inW,
+          h: t,
+        }));
+      }),
+  },
+  {
+    id: "bajo-mesada",
+    name: "Bajo mesada cajón + puerta",
+    hint: "Cajón superior y puerta batiente abajo",
+    build: () =>
+      tpl("Bajo mesada", { width: 0.6, depth: 0.58, height: 0.85 }, (f) => {
+        const t = f.panel;
+        const inW = f.width - 2 * t;
+        return [
+          { kind: "drawer", x: t, y: f.height - t - 0.18, w: inW, h: 0.18, count: 1, open: 0 },
+          { kind: "doorHinged", x: t, y: t, w: inW, h: f.height - 2 * t - 0.18 - 0.003, hinge: "left", open: 0 },
+        ];
+      }),
+  },
+];
 
 /** Genera la forma 3D (cajas + cilindros con color) de un equipamiento. Frente hacia -z. */
 export function appliancePanels(f: Furniture): Panel[] {
