@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEditor } from "@/lib/store";
 import type { ComponentKind, FurnitureComponent } from "@/lib/types";
 
@@ -19,7 +19,8 @@ const KIND_STYLE: Record<ComponentKind, { fill: string; stroke: string; label: s
 type Corner = "bl" | "br" | "tl" | "tr";
 type Gesture =
   | { mode: "move"; id: string; startFx: number; startFy: number; ox: number; oy: number; committed: boolean }
-  | { mode: "resize"; id: string; corner: Corner; ax: number; ay: number; committed: boolean };
+  | { mode: "resize"; id: string; corner: Corner; ax: number; ay: number; committed: boolean }
+  | { mode: "pan"; sx: number; sy: number; ox: number; oy: number };
 
 const snap = (v: number) => Math.round(v / 0.01) * 0.01;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -80,26 +81,57 @@ export default function FrontElevationEditor() {
   const gestureRef = useRef<Gesture | null>(null);
   // Líneas-guía activas durante un arrastre (coordenadas en metros).
   const guidesRef = useRef<{ x: number[]; y: number[] }>({ x: [], y: [] });
+  // Zoom/paneo de la vista: zoom multiplica la escala de ajuste; pan en píxeles.
+  const viewRef = useRef({ zoom: 1, panX: 0, panY: 0 });
+  const [zoomPct, setZoomPct] = useState(100);
+  // Punteros activos (para pellizco en táctil) y estado del pellizco.
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{ d: number; mx: number; my: number } | null>(null);
 
   const draft = useEditor((s) => s.draft);
   const selectedId = useEditor((s) => s.selectedComponentId);
   const showDims = useEditor((s) => s.workbenchDims);
 
-  // transform helpers basados en el draft actual
+  // transform helpers basados en el draft actual (ajuste a la vista × zoom + paneo)
   const tf = () => {
     const { w: cw, h: ch } = sizeRef.current;
     const W = draft?.width ?? 1;
     const H = draft?.height ?? 1;
     const pad = 56;
-    const scale = Math.max(1, Math.min((cw - 2 * pad) / W, (ch - 2 * pad) / H));
-    const ox = (cw - W * scale) / 2;
-    const oy = (ch - H * scale) / 2;
+    const v = viewRef.current;
+    const scale = Math.max(1, Math.min((cw - 2 * pad) / W, (ch - 2 * pad) / H)) * v.zoom;
+    const ox = (cw - W * scale) / 2 + v.panX;
+    const oy = (ch - H * scale) / 2 + v.panY;
     return { cw, ch, W, H, scale, ox, oy };
   };
   const sx = (x: number, t = tf()) => t.ox + x * t.scale;
   const sy = (y: number, t = tf()) => t.oy + (t.H - y) * t.scale;
   const fx = (px: number, t = tf()) => (px - t.ox) / t.scale;
   const fy = (py: number, t = tf()) => t.H - (py - t.oy) / t.scale;
+
+  // Zoom alrededor de un punto de la pantalla: el punto del mueble bajo el
+  // cursor queda quieto mientras la escala cambia.
+  const applyZoom = (px: number, py: number, factor: number) => {
+    const t = tf();
+    const wx = fx(px, t);
+    const wy = fy(py, t);
+    const v = viewRef.current;
+    v.zoom = clamp(v.zoom * factor, 0.25, 8);
+    const t2 = tf();
+    v.panX += px - sx(wx, t2);
+    v.panY += py - sy(wy, t2);
+    setZoomPct(Math.round(v.zoom * 100));
+    draw();
+  };
+  const zoomCenter = (factor: number) => {
+    const { w, h } = sizeRef.current;
+    applyZoom(w / 2, h / 2, factor);
+  };
+  const resetView = () => {
+    viewRef.current = { zoom: 1, panX: 0, panY: 0 };
+    setZoomPct(100);
+    draw();
+  };
 
   const corners = (c: FurnitureComponent) => ({
     bl: { x: c.x, y: c.y },
@@ -345,6 +377,21 @@ export default function FrontElevationEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Rueda del mouse = zoom en el cursor. Listener manual (no pasivo) para poder
+  // frenar el scroll de la página. Se rebindea con el draft para no quedar viejo.
+  useEffect(() => {
+    const cv = canvasRef.current;
+    if (!cv) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = cv.getBoundingClientRect();
+      applyZoom(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.12 : 1 / 1.12);
+    };
+    cv.addEventListener("wheel", onWheel, { passive: false });
+    return () => cv.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
+
   const getFace = (e: React.PointerEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
     const t = tf();
@@ -358,6 +405,15 @@ export default function FrontElevationEditor() {
     } catch {}
     const t = tf();
     const { fx: mx, fy: my, px, py } = getFace(e);
+    pointersRef.current.set(e.pointerId, { x: px, y: py });
+    // Segundo dedo: arranca el pellizco (zoom táctil) y se cancela el gesto en curso.
+    if (pointersRef.current.size === 2) {
+      const [p1, p2] = [...pointersRef.current.values()];
+      pinchRef.current = { d: Math.hypot(p2.x - p1.x, p2.y - p1.y) || 1, mx: (p1.x + p2.x) / 2, my: (p1.y + p2.y) / 2 };
+      gestureRef.current = null;
+      guidesRef.current = { x: [], y: [] };
+      return;
+    }
     const st = useEditor.getState();
     const comps = draft.components ?? [];
 
@@ -384,13 +440,36 @@ export default function FrontElevationEditor() {
         return;
       }
     }
+    // Vacío: deselecciona y arrastra la vista (paneo).
     st.selectComponent(null);
+    gestureRef.current = { mode: "pan", sx: px, sy: py, ox: viewRef.current.panX, oy: viewRef.current.panY };
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    if (!draft) return;
+    const { fx: mx, fy: my, px, py } = getFace(e);
+    if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, { x: px, y: py });
+    // Pellizco activo: zoom en el punto medio + paneo con el movimiento de los dedos.
+    const pinch = pinchRef.current;
+    if (pinch && pointersRef.current.size >= 2) {
+      const [p1, p2] = [...pointersRef.current.values()];
+      const d = Math.hypot(p2.x - p1.x, p2.y - p1.y) || 1;
+      const cx2 = (p1.x + p2.x) / 2;
+      const cy2 = (p1.y + p2.y) / 2;
+      viewRef.current.panX += cx2 - pinch.mx;
+      viewRef.current.panY += cy2 - pinch.my;
+      applyZoom(cx2, cy2, d / pinch.d);
+      pinchRef.current = { d, mx: cx2, my: cy2 };
+      return;
+    }
     const g = gestureRef.current;
-    if (!g || !draft) return;
-    const { fx: mx, fy: my } = getFace(e);
+    if (!g) return;
+    if (g.mode === "pan") {
+      viewRef.current.panX = g.ox + (px - g.sx);
+      viewRef.current.panY = g.oy + (py - g.sy);
+      draw();
+      return;
+    }
     const st = useEditor.getState();
     const W = draft.width;
     const H = draft.height;
@@ -441,6 +520,8 @@ export default function FrontElevationEditor() {
       const cv = canvasRef.current;
       if (cv && cv.hasPointerCapture(e.pointerId)) cv.releasePointerCapture(e.pointerId);
     } catch {}
+    pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size < 2) pinchRef.current = null;
     gestureRef.current = null;
     guidesRef.current = { x: [], y: [] };
     draw();
@@ -458,7 +539,34 @@ export default function FrontElevationEditor() {
         onPointerCancel={endGesture}
       />
       <div className="pointer-events-none absolute left-3 top-2 text-[11px] text-neutral-500">
-        Alzado frontal · clic para seleccionar · arrastrá para mover · esquinas para redimensionar · flechas para ajuste fino · Ctrl+C/V copia
+        Alzado frontal · clic para seleccionar · arrastrá para mover · esquinas para redimensionar · rueda/pellizco: zoom · arrastrá el vacío: mover vista · Ctrl+C/V copia
+      </div>
+      {/* Controles de zoom */}
+      <div className="absolute bottom-2 right-2 flex items-center gap-0.5 rounded-lg border border-neutral-800 bg-neutral-900/90 px-1 py-0.5 text-neutral-300 shadow-lg backdrop-blur">
+        <button
+          type="button"
+          onClick={() => zoomCenter(1 / 1.25)}
+          title="Alejar"
+          className="grid h-7 w-7 place-items-center rounded text-base hover:bg-neutral-800"
+        >
+          −
+        </button>
+        <button
+          type="button"
+          onClick={resetView}
+          title="Ajustar a la vista (100%)"
+          className="w-12 rounded px-1 py-1 text-center text-[11px] tabular-nums hover:bg-neutral-800"
+        >
+          {zoomPct}%
+        </button>
+        <button
+          type="button"
+          onClick={() => zoomCenter(1.25)}
+          title="Acercar"
+          className="grid h-7 w-7 place-items-center rounded text-base hover:bg-neutral-800"
+        >
+          +
+        </button>
       </div>
     </div>
   );
