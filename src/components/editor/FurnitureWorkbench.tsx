@@ -6,7 +6,7 @@ import FrontElevationEditor from "./FrontElevationEditor";
 import WorkbenchControls from "./WorkbenchControls";
 import WorkbenchPreview3D from "./WorkbenchPreview3D";
 import WorkbenchCutList from "./WorkbenchCutList";
-import EnvSwitch, { TallerTabs } from "./EnvSwitch";
+import EnvSwitch, { TallerTabs, SaveProjectButton } from "./EnvSwitch";
 import { CloseIcon, CabinetIcon, UndoIcon, RedoIcon, RulerIcon } from "./icons";
 import { isTypingTarget } from "@/lib/dom";
 
@@ -133,6 +133,9 @@ export default function FurnitureWorkbench() {
           >
             🧾 <span className="hidden sm:inline">Despiece</span>
           </button>
+          <span className="ml-1">
+            <SaveProjectButton />
+          </span>
           <button
             type="button"
             onClick={() => setView("plan")}

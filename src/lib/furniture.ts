@@ -422,6 +422,26 @@ export function makeComponent(kind: ComponentKind, f: Furniture): FurnitureCompo
   }
 }
 
+/** Espesor y retiro EFECTIVOS del fondo de un mueble custom (y si existe). */
+export function backInfo(f: Furniture): { bt: number; bi: number; has: boolean } {
+  const t = Math.min(f.panel, Math.min(f.width, f.depth, f.height) / 3);
+  const has = f.carcass !== false && f.back !== false;
+  const bt = Math.min(f.backThickness ?? t, f.depth / 2);
+  const groove = f.backGroove === true;
+  const bi = Math.min(Math.max(f.backInset ?? (groove ? 0.01 : 0), 0), Math.max(0, f.depth - bt - 0.01));
+  return { bt, bi, has };
+}
+
+/**
+ * Profundidad interior ÚTIL: de la cara frontal a la cara del fondo, descontando
+ * espesor y retiro del fondo (sin fondo → toda la profundidad). Es la medida de
+ * corte correcta para estantes y divisiones.
+ */
+export function innerDepth(f: Furniture): number {
+  const { bt, bi, has } = backInfo(f);
+  return Math.max(0.02, has ? f.depth - bi - bt : f.depth);
+}
+
 /** Genera los paneles 3D de un mueble custom: carcasa + componentes. */
 export function buildCustomPanels(f: Furniture): Panel[] {
   const W = f.width;
@@ -449,10 +469,8 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       // retiro queda el hueco para embutir un listón francés oculto contra la pared.
       // Ranurado: entra 6 mm por lado en laterales/piso/techo → la pieza sale más grande
       // (queda oculta dentro de la ranura; en 3D el solape no se ve).
-      const bt = Math.min(f.backThickness ?? t, D / 2);
+      const { bt, bi } = backInfo(f);
       const groove = f.backGroove === true;
-      const biDefault = groove ? 0.01 : 0;
-      const bi = Math.min(Math.max(f.backInset ?? biDefault, 0), Math.max(0, D - bt - 0.01));
       const g2 = groove ? 0.012 : 0; // 6 mm por lado
       panels.push({ pos: [0, base + plinth / 2 + H / 2, D / 2 - bi - bt / 2], size: [inW + g2, H - plinth - 2 * t + g2, bt], role: groove ? "Fondo (ranurado)" : "Fondo" });
     }
@@ -467,18 +485,15 @@ export function buildCustomPanels(f: Furniture): Panel[] {
   // incrustan en laterales/piso/techo y la tapa cerrada se ve metida en el mueble.
   const frontFace = -D / 2;
   const cl = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-  const fullD = D - t;
-  // Profundidad (eje Z) y retiro desde el frente de un componente.
-  // Sin depth ni depthInset → comportamiento previo (centrado, casi toda la profundidad).
+  // Profundidad interior útil: de la cara frontal a la cara del fondo (descuenta
+  // espesor Y retiro del fondo). Es el default de estantes/divisiones/cajones.
+  const fullD = innerDepth(f);
+  // Profundidad (eje Z) y retiro desde el frente de un componente. Default:
+  // arranca en la cara frontal (retiro 0) y muere contra el fondo — la medida
+  // que se ve en "Profundidad" es directamente la de corte.
   const depthZ = (c: FurnitureComponent): { zc: number; zs: number } => {
-    if (c.depth == null) {
-      const zs = fullD;
-      if (c.depthInset == null) return { zc: 0, zs };
-      const inset = cl(c.depthInset, 0, Math.max(0, D - zs));
-      return { zc: -D / 2 + inset + zs / 2, zs };
-    }
-    const zs = cl(c.depth, 0.02, D);
-    const inset = c.depthInset != null ? cl(c.depthInset, 0, Math.max(0, D - zs)) : (D - zs) / 2;
+    const zs = c.depth == null ? fullD : cl(c.depth, 0.02, D);
+    const inset = cl(c.depthInset ?? 0, 0, Math.max(0, D - zs));
     return { zc: -D / 2 + inset + zs / 2, zs };
   };
 
@@ -533,7 +548,9 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       const n = Math.max(1, c.count ?? 1);
       const each = c.h / n;
       const pull = open * Math.min(D * 0.7, 0.4);
-      const boxD = cl(c.depth ?? D - 2 * ct - 0.02, 0.05, D - ct);
+      // Caja del cajón: entra desde el frente y deja 2 cm de luz contra el fondo
+      // (respetando espesor + retiro del fondo para no invadir el hueco del francés).
+      const boxD = cl(c.depth ?? fullD - 0.02, 0.05, D - ct);
       for (let i = 0; i < n; i++) {
         const dy = c.y + i * each;
         const fY = cyTop(dy, each);

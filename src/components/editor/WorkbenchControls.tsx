@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useEditor } from "@/lib/store";
-import { FURNITURE_PRESETS, WORKSHOP_TEMPLATES } from "@/lib/furniture";
+import { FURNITURE_PRESETS, WORKSHOP_TEMPLATES, innerDepth } from "@/lib/furniture";
 import { uid } from "@/lib/geometry";
 import type { ComponentKind, FurnitureComponent } from "@/lib/types";
 import { TrashIcon, CopyIcon } from "./icons";
@@ -163,10 +163,10 @@ function CompProps({ c }: { c: FurnitureComponent }) {
         const showDepth =
           c.kind === "shelf" || c.kind === "divider" || c.kind === "drawer" || c.kind === "cleat" || (c.kind === "board" && (orient !== "front" || shaped));
         const showInset = c.kind === "shelf" || c.kind === "divider" || c.kind === "board";
-        const defaultDepth =
-          c.kind === "drawer"
-            ? Math.max(0.05, draftDepth - 2 * draftPanel - 0.02)
-            : Math.max(0.02, draftDepth - draftPanel);
+        // Profundidad interior útil (descuenta espesor Y retiro del fondo): el valor
+        // que se muestra es directamente la medida de corte de la pieza.
+        const innerD = draft ? innerDepth(draft) : draftDepth;
+        const defaultDepth = c.kind === "drawer" ? Math.max(0.05, innerD - 0.02) : Math.max(0.02, innerD);
         return (
           <>
             {showDepth && (

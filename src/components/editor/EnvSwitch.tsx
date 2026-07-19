@@ -1,6 +1,8 @@
 "use client";
 
 import { useEditor } from "@/lib/store";
+import { saveProject } from "@/lib/storage";
+import { SaveIcon } from "./icons";
 
 /**
  * Switch de ambientes tipo pastilla: Taller (diseño de muebles, con su galería
@@ -34,6 +36,41 @@ export default function EnvSwitch() {
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * Guardar el PROYECTO completo (muebles de la biblioteca incluidos) sin salir
+ * del ambiente actual — mismo guardado que el botón del plano.
+ */
+export function SaveProjectButton() {
+  const projectName = useEditor((s) => s.projectName);
+  const dirty = useEditor((s) => s.dirty);
+  const exportData = useEditor((s) => s.exportData);
+  const markSaved = useEditor((s) => s.markSaved);
+  const pushToast = useEditor((s) => s.pushToast);
+
+  const onSave = () => {
+    const name = projectName.trim();
+    if (!name) {
+      window.alert("Poné un nombre al proyecto antes de guardar.");
+      return;
+    }
+    saveProject(name, exportData(), Date.now());
+    markSaved();
+    pushToast(`Guardado: ${name}`, "ok");
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={onSave}
+      title={`Guardar proyecto "${projectName}" (muebles incluidos)`}
+      className="relative flex shrink-0 items-center gap-1.5 rounded-md bg-sky-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-sky-500"
+    >
+      <SaveIcon width={14} height={14} /> <span className="hidden sm:inline">Guardar</span>
+      {dirty && <span title="Cambios sin guardar" className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400" />}
+    </button>
   );
 }
 
