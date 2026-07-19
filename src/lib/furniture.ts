@@ -433,20 +433,33 @@ export function buildCustomPanels(f: Furniture): Panel[] {
   const panels: Panel[] = [];
 
   // carcasa (caja). Se puede desactivar para hacer formas libres (ej. una escalera).
+  const plinth = Math.min(Math.max(f.plinth ?? 0, 0), H / 2);
   if (f.carcass !== false) {
     panels.push({ pos: [-(W / 2 - t / 2), base + H / 2, 0], size: [t, H, D], role: "Lateral", edges: { front: true } });
     panels.push({ pos: [W / 2 - t / 2, base + H / 2, 0], size: [t, H, D], role: "Lateral", edges: { front: true } });
-    panels.push({ pos: [0, base + t / 2, 0], size: [inW, t, D], role: "Piso", edges: { front: true } });
+    // Con zócalo el piso del mueble sube y se agrega la tira de zócalo retirada del frente.
+    panels.push({ pos: [0, base + plinth + t / 2, 0], size: [inW, t, D], role: "Piso", edges: { front: true } });
     panels.push({ pos: [0, base + H - t / 2, 0], size: [inW, t, D], role: "Techo", edges: { front: true } });
+    if (plinth > 0.005) {
+      const pin = Math.min(Math.max(f.plinthInset ?? 0.05, 0), D / 2);
+      panels.push({ pos: [0, base + plinth / 2, -D / 2 + pin + t / 2], size: [inW, plinth, t], role: "Zócalo", edges: { front: true } });
+    }
     if (f.back !== false) {
       // Fondo con espesor propio (típico 3 mm) y retiro desde atrás: con 18–20 mm de
       // retiro queda el hueco para embutir un listón francés oculto contra la pared.
+      // Ranurado: entra 6 mm por lado en laterales/piso/techo → la pieza sale más grande
+      // (queda oculta dentro de la ranura; en 3D el solape no se ve).
       const bt = Math.min(f.backThickness ?? t, D / 2);
-      const bi = Math.min(Math.max(f.backInset ?? 0, 0), Math.max(0, D - bt - 0.01));
-      panels.push({ pos: [0, base + H / 2, D / 2 - bi - bt / 2], size: [inW, H - 2 * t, bt], role: "Fondo" });
+      const groove = f.backGroove === true;
+      const biDefault = groove ? 0.01 : 0;
+      const bi = Math.min(Math.max(f.backInset ?? biDefault, 0), Math.max(0, D - bt - 0.01));
+      const g2 = groove ? 0.012 : 0; // 6 mm por lado
+      panels.push({ pos: [0, base + plinth / 2 + H / 2, D / 2 - bi - bt / 2], size: [inW + g2, H - plinth - 2 * t + g2, bt], role: groove ? "Fondo (ranurado)" : "Fondo" });
     }
   }
 
+  // Luz entre frentes (puertas, tapas, frentes de cajón). Configurable por mueble.
+  const GAPF = Math.min(Math.max(f.frontGap ?? GAP, 0), 0.02);
   const cx = (x: number, w: number) => -W / 2 + x + w / 2;
   const cyTop = (y: number, h: number) => base + y + h / 2;
   // Cara frontal de la carcasa. Los FRENTES (puertas, tapas, frentes de cajón) van
@@ -530,7 +543,7 @@ export function buildCustomPanels(f: Furniture): Panel[] {
         const boxZc = fz + ct / 2 + boxD / 2;
         const sideH = Math.max(each * 0.55, 0.05);
         const boxYc = fY - each / 2 + sideH / 2 + ct;
-        panels.push({ pos: [bxc, fY, fz], size: [c.w - GAP, each - GAP, ct], door: true, color: col, materialId: mat, role: "Frente cajón", edges: { front: true, back: true, left: true, right: true } }); // frente
+        panels.push({ pos: [bxc, fY, fz], size: [c.w - GAPF, each - GAPF, ct], door: true, color: col, materialId: mat, role: "Frente cajón", edges: { front: true, back: true, left: true, right: true } }); // frente
         panels.push({ pos: [bxc, fY - each / 2 + ct, boxZc], size: [c.w - 2 * ct, ct, boxD], role: "Piso cajón" }); // piso
         panels.push({ pos: [bxc, boxYc, boxZc + boxD / 2 - ct / 2], size: [c.w - 2 * ct, sideH, ct], role: "Contrafrente cajón" }); // fondo cajón
         panels.push({ pos: [bxc - c.w / 2 + ct / 2, boxYc, boxZc], size: [ct, sideH, boxD], role: "Lateral cajón" }); // lado izq
@@ -543,7 +556,7 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       const fz = frontFace - ct / 2; // hoja sobrepuesta al frente
       panels.push({
         pos: [cx(c.x, c.w), cyTop(c.y, c.h), fz],
-        size: [c.w - GAP, c.h - GAP, ct],
+        size: [c.w - GAPF, c.h - GAPF, ct],
         door: true,
         color: col,
         materialId: mat,
@@ -564,7 +577,7 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       const ang = up ? open * Math.PI * 0.55 : -open * Math.PI * 0.5;
       panels.push({
         pos: [bx, cyTop(c.y, c.h), fz],
-        size: [c.w - GAP, c.h - GAP, ct],
+        size: [c.w - GAPF, c.h - GAPF, ct],
         door: true,
         color: col,
         materialId: mat,
@@ -604,7 +617,7 @@ export function buildCustomPanels(f: Furniture): Panel[] {
         const z = frontFace - ct / 2 - track * trackGap;
         const closedX = -W / 2 + c.x + i * seg + seg / 2;
         const x = closedX - open * i * seg;
-        panels.push({ pos: [x, cyTop(c.y, c.h), z], size: [leafW - GAP, c.h - GAP, ct], door: true, color: col, materialId: mat, role: "Puerta corrediza", edges: { front: true, back: true, left: true, right: true } });
+        panels.push({ pos: [x, cyTop(c.y, c.h), z], size: [leafW - GAPF, c.h - GAPF, ct], door: true, color: col, materialId: mat, role: "Puerta corrediza", edges: { front: true, back: true, left: true, right: true } });
       }
     }
   }
@@ -720,14 +733,15 @@ export const WORKSHOP_TEMPLATES: WorkshopTemplate[] = [
   {
     id: "bajo-mesada",
     name: "Bajo mesada cajón + puerta",
-    hint: "Cajón superior y puerta batiente abajo",
+    hint: "Con zócalo, cajón superior y puerta batiente",
     build: () =>
-      tpl("Bajo mesada", { width: 0.6, depth: 0.58, height: 0.85 }, (f) => {
+      tpl("Bajo mesada", { width: 0.6, depth: 0.58, height: 0.85, plinth: 0.1, plinthInset: 0.05 }, (f) => {
         const t = f.panel;
         const inW = f.width - 2 * t;
+        const y0 = 0.1 + t; // el interior arranca sobre el zócalo
         return [
           { kind: "drawer", x: t, y: f.height - t - 0.18, w: inW, h: 0.18, count: 1, open: 0 },
-          { kind: "doorHinged", x: t, y: t, w: inW, h: f.height - 2 * t - 0.18 - 0.003, hinge: "left", open: 0 },
+          { kind: "doorHinged", x: t, y: y0, w: inW, h: f.height - t - 0.18 - 0.003 - y0, hinge: "left", open: 0 },
         ];
       }),
   },

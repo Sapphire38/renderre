@@ -21,7 +21,14 @@ export type Hardware = {
   pulls: number; // tiradores / manijas
   rods: number; // barrales
   pistons: number; // pistones a gas / brazos hidráulicos (tapas verticales)
+  pins: number; // soportes de estante regulable (sistema 32)
 };
+
+/** Peso estimado de las piezas (kg). Densidad MDF ≈ 730 kg/m³. */
+export function weightOf(pieces: CutPiece[]): number {
+  const kg = pieces.reduce((a, p) => a + p.largo * p.ancho * p.thickness * 730 * p.qty, 0);
+  return Math.round(kg * 10) / 10;
+}
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000; // a milímetros
 const isFlat = (p: Panel) => !p.cylinder && !p.shape;
@@ -58,10 +65,12 @@ export function cutList(f: Furniture): CutPiece[] {
 
 /** Cuenta los herrajes a partir de los componentes / puertas del mueble. */
 export function hardwareOf(f: Furniture): Hardware {
-  const hw: Hardware = { hinges: 0, slides: 0, pulls: 0, rods: 0, pistons: 0 };
+  const hw: Hardware = { hinges: 0, slides: 0, pulls: 0, rods: 0, pistons: 0, pins: 0 };
   if (f.kind === "custom") {
     for (const c of f.components ?? []) {
-      if (c.kind === "doorHinged") {
+      if (c.kind === "shelf" && c.adjustable) {
+        hw.pins += 4; // 4 soportes por estante regulable
+      } else if (c.kind === "doorHinged") {
         const leaves = 1;
         hw.hinges += leaves * (c.h > 1.4 ? 3 : 2);
         hw.pulls += 1;
@@ -121,7 +130,8 @@ export function budgetOf(pieces: CutPiece[], hw: Hardware, pricing: Pricing): Bu
     hw.slides * pricing.slidePrice +
     hw.pulls * pricing.pullPrice +
     hw.rods * pricing.rodPrice +
-    hw.pistons * (pricing.pistonPrice ?? 6000); // fallback para proyectos guardados sin este precio
+    hw.pistons * (pricing.pistonPrice ?? 6000) + // fallback para proyectos guardados sin este precio
+    hw.pins * (pricing.shelfPinPrice ?? 150);
   const labor = area * pricing.laborPerM2;
   return {
     pieces: count,

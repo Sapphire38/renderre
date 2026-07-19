@@ -162,7 +162,38 @@ export default function FrontElevationEditor() {
       ctx.strokeRect(x0 + pPx / 2, y1 + pPx / 2, x1 - x0 - pPx, y0 - y1 - pPx);
     }
 
+    // zócalo: banda inferior con su línea (el interior del mueble arranca encima)
+    const plinthM = draft.carcass === false ? 0 : draft.plinth ?? 0;
+    if (plinthM > 0.005) {
+      const py = sy(plinthM, t);
+      ctx.fillStyle = "rgba(206,213,224,0.07)";
+      ctx.fillRect(x0, py, x1 - x0, y0 - py);
+      ctx.strokeStyle = "rgba(206,213,224,0.45)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x0, py);
+      ctx.lineTo(x1, py);
+      ctx.stroke();
+      tag(ctx, "zócalo", (x0 + x1) / 2, (py + y0) / 2, "rgba(206,213,224,0.6)");
+    }
+
     const comps = draft.components ?? [];
+
+    // Sistema 32: si hay algún estante regulable, columnas de perforado en los laterales
+    // (agujeros cada 32 mm, a 37 mm de los cantos, como se marcan en el taller).
+    if (draft.carcass !== false && comps.some((c) => c.kind === "shelf" && c.adjustable)) {
+      const tt = draft.panel || 0.018;
+      const yLo = Math.max(tt, plinthM + tt) + 0.037;
+      const yHi = t.H - tt - 0.037;
+      ctx.fillStyle = "rgba(148,163,184,0.55)";
+      for (const xm of [tt + 0.037, t.W - tt - 0.037]) {
+        for (let ym = yLo; ym <= yHi + 1e-9; ym += 0.032) {
+          ctx.beginPath();
+          ctx.arc(sx(xm, t), sy(ym, t), 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
 
     // componentes
     for (const c of comps) {

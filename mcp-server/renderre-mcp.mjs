@@ -83,6 +83,7 @@ const COMPONENT_PROPS = {
   count: num, hinge: { enum: ["left", "right"] }, orient: { enum: ["front", "horizontal", "vertical"] },
   flapDir: { enum: ["up", "down"], description: "tapa vertical (doorFlap): abre hacia arriba (con pistones) o abajo" },
   pistons: { type: "boolean", description: "tapa vertical hacia arriba: dibujar brazos hidráulicos (default true)" },
+  adjustable: { type: "boolean", description: "estante (shelf): regulable con sistema 32 (perforado + 4 soportes)" },
   shape: { enum: ["box", "cylinder", "sphere", "cone", "pyramid", "wedge"], description: "solo placa (board): forma 3D" },
   open: { ...num, description: "0..1 apertura para previsualizar" },
   color: str, materialId: str,
@@ -391,8 +392,8 @@ const TOOLS = [
   },
   {
     name: "renderre_set_draft",
-    description: "Ajusta el mueble en edición en el Taller: nombre, medidas (width/height/depth/panel, m), color, fondo (back) y carcasa (carcass: false = sin la caja, solo componentes, para formas libres como una escalera).",
-    inputSchema: { type: "object", properties: { name: str, width: num, height: num, depth: num, panel: num, color: str, back: bool, carcass: bool } },
+    description: "Ajusta el mueble en edición en el Taller: nombre, medidas (width/height/depth/panel, m), color, fondo (back, backThickness, backInset, backGroove), luz entre frentes (frontGap), zócalo (plinth/plinthInset) y carcasa (carcass: false = sin la caja, solo componentes, para formas libres como una escalera).",
+    inputSchema: { type: "object", properties: { name: str, width: num, height: num, depth: num, panel: num, color: str, back: bool, carcass: bool, backThickness: { ...num, description: "espesor del fondo (m), típico 0.003" }, backInset: { ...num, description: "retiro del fondo desde atrás (m); 0.018-0.02 deja hueco para listón francés" }, backGroove: { ...bool, description: "fondo ranurado: +6 mm por lado en el despiece" }, frontGap: { ...num, description: "luz entre frentes (m), default 0.003" }, plinth: { ...num, description: "altura de zócalo (m)" }, plinthInset: { ...num, description: "retiro del zócalo desde el frente (m), default 0.05" } } },
     handler: (a) => runCommand("set_draft", a, "Ajustar mueble"),
   },
   {

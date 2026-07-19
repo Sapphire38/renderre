@@ -237,6 +237,20 @@ function CompProps({ c }: { c: FurnitureComponent }) {
         </div>
       </div>
 
+      {c.kind === "shelf" && (
+        <label className="flex items-center justify-between gap-2 py-1 text-sm">
+          <span className="text-neutral-400" title="Perforaciones cada 32 mm en los laterales + 4 soportes en el conteo de herrajes">
+            Regulable (sistema 32)
+          </span>
+          <input
+            type="checkbox"
+            checked={c.adjustable === true}
+            onFocus={beginEdit}
+            onChange={(e) => set({ adjustable: e.target.checked })}
+            className="h-4 w-4 accent-sky-500"
+          />
+        </label>
+      )}
       {c.kind === "drawer" && (
         <Num label="Cajones" value={c.count ?? 1} unit="" min={1} max={8} onChange={(v) => set({ count: clamp(Math.round(v), 1, 8) })} />
       )}
@@ -555,6 +569,35 @@ export default function WorkbenchControls() {
         <Num label="Alto" value={cm(draft.height)} unit="cm" min={10} max={300} step={0.1} onChange={(v) => updateDraft({ height: clamp(v / 100, 0.1, 3) })} />
         <Num label="Profundidad" value={cm(draft.depth)} unit="cm" min={5} max={120} step={0.1} onChange={(v) => updateDraft({ depth: clamp(v / 100, 0.05, 1.2) })} />
         <Num label="Espesor MDF" value={mm(draft.panel)} unit="mm" min={3} max={50} step={0.1} onChange={(v) => updateDraft({ panel: clamp(v / 1000, 0.003, 0.05) })} />
+        <Num
+          label="Luz entre frentes"
+          value={mm(draft.frontGap ?? 0.003)}
+          unit="mm"
+          min={0}
+          max={20}
+          step={0.5}
+          onChange={(v) => updateDraft({ frontGap: clamp(v / 1000, 0, 0.02) })}
+        />
+        <Num
+          label="Zócalo (alto)"
+          value={mm(draft.plinth ?? 0)}
+          unit="mm"
+          min={0}
+          max={mm(draft.height / 2)}
+          step={5}
+          onChange={(v) => updateDraft({ plinth: clamp(v / 1000, 0, draft.height / 2) })}
+        />
+        {(draft.plinth ?? 0) > 0.005 && (
+          <Num
+            label="Retiro zócalo"
+            value={mm(draft.plinthInset ?? 0.05)}
+            unit="mm"
+            min={0}
+            max={mm(draft.depth / 2)}
+            step={5}
+            onChange={(v) => updateDraft({ plinthInset: clamp(v / 1000, 0, draft.depth / 2) })}
+          />
+        )}
         <div className="flex items-center justify-between gap-2 py-1">
           <span className="text-neutral-400" title="Dibujar la caja (laterales, piso, techo). Apagalo para formas libres como una escalera.">Carcasa (caja)</span>
           <input type="checkbox" checked={draft.carcass !== false} onFocus={beginEdit} onChange={(e) => updateDraft({ carcass: e.target.checked })} className="h-4 w-4 accent-sky-500" />
@@ -583,6 +626,18 @@ export default function WorkbenchControls() {
               step={1}
               onChange={(v) => updateDraft({ backInset: clamp(v / 1000, 0, draft.depth / 2) })}
             />
+            <div className="flex items-center justify-between gap-2 py-1">
+              <span className="text-neutral-400" title="El fondo entra 6 mm por lado en ranura de laterales/piso/techo. La pieza del despiece sale 12 mm más grande.">
+                Fondo ranurado
+              </span>
+              <input
+                type="checkbox"
+                checked={draft.backGroove === true}
+                onFocus={beginEdit}
+                onChange={(e) => updateDraft({ backGroove: e.target.checked })}
+                className="h-4 w-4 accent-sky-500"
+              />
+            </div>
             <p className="-mt-0.5 pb-1 text-[10px] leading-snug text-neutral-600">
               Fondo típico: 3 mm. Con retiro de 18–20 mm queda el hueco para colgar el mueble con
               listón francés embutido (agregalo como componente).

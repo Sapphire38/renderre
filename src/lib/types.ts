@@ -127,6 +127,8 @@ export type Pricing = {
   rodPrice: number;
   /** $ por pistón a gas / brazo hidráulico (tapas de apertura vertical). Opcional para proyectos viejos. */
   pistonPrice?: number;
+  /** $ por soporte de estante regulable (sistema 32). Opcional para proyectos viejos. */
+  shelfPinPrice?: number;
   laborPerM2: number; // $ de mano de obra por m² de placa
   yield: number; // 0..1 aprovechamiento estimado de la placa (sin nesting)
 };
@@ -314,6 +316,9 @@ export type FurnitureComponent = {
   depth?: number;
   /** Retiro en profundidad: distancia desde el frente del mueble (m). Si falta, va centrado. */
   depthInset?: number;
+  /** Estante: regulable con sistema 32 (perforaciones cada 32 mm en los laterales +
+   *  4 soportes por estante en el conteo de herrajes). */
+  adjustable?: boolean;
   open?: number; // 0..1 apertura para previsualizar
   color?: string; // color propio del componente (combinar acabados); si falta usa el del mueble
   materialId?: string; // material propio del componente (textura/melamina); tiene prioridad sobre color
@@ -344,6 +349,17 @@ export type Furniture = {
   /** Retiro del fondo desde la cara trasera (m). Default 0 (a tope). Con 18–20 mm queda el hueco
    *  para embutir un sistema de fijación francés (listón a 45°) oculto contra la pared. */
   backInset?: number;
+  /** Fondo ranurado: entra 6 mm por lado en ranura de laterales/piso/techo. La pieza del
+   *  despiece sale 12 mm más grande en ambos sentidos. Default false (fondo aplicado/a tope). */
+  backGroove?: boolean;
+  /** Luz entre frentes (m): separación entre puertas/frentes de cajón y entre frente y carcasa.
+   *  Default 0.003 (3 mm). */
+  frontGap?: number;
+  /** Altura de zócalo (m). > 0 = el piso del mueble sube y se agrega la tira de zócalo
+   *  retirada del frente (típico cocina: 100 mm de alto, 50 mm de retiro). Default 0. */
+  plinth?: number;
+  /** Retiro del zócalo desde el frente (m). Default 0.05. */
+  plinthInset?: number;
   /** custom: dibujar la carcasa/caja (laterales+piso+techo+fondo). default true. false = solo componentes (formas libres, ej. una escalera). */
   carcass?: boolean;
   /** Modelo 3D externo (.glb/glTF): data URL o ruta. Si está, se renderiza el modelo (fit a width×depth) con fallback a caja. */
@@ -442,6 +458,7 @@ export const DEFAULT_PRICING: Pricing = {
   pullPrice: 1200,
   rodPrice: 3000,
   pistonPrice: 6000,
+  shelfPinPrice: 150,
   laborPerM2: 30000,
   yield: 0.75,
 };
