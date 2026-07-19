@@ -84,6 +84,7 @@ const COMPONENT_PROPS = {
   flapDir: { enum: ["up", "down"], description: "tapa vertical (doorFlap): abre hacia arriba (con pistones) o abajo" },
   pistons: { type: "boolean", description: "tapa vertical hacia arriba: dibujar brazos hidráulicos (default true)" },
   adjustable: { type: "boolean", description: "estante (shelf): regulable con sistema 32 (perforado + 4 soportes)" },
+  hidden: { type: "boolean", description: "capa oculta en el alzado/3D del taller (sigue contando en el despiece)" },
   shape: { enum: ["box", "cylinder", "sphere", "cone", "pyramid", "wedge"], description: "solo placa (board): forma 3D" },
   open: { ...num, description: "0..1 apertura para previsualizar" },
   color: str, materialId: str,
