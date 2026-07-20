@@ -442,6 +442,37 @@ export function innerDepth(f: Furniture): number {
   return Math.max(0.02, has ? f.depth - bi - bt : f.depth);
 }
 
+/**
+ * Luz efectiva de UNA abertura (puerta/tapa/frente): la propia (`gap`) manda;
+ * si no, se calcula por herraje con la fórmula del arco √(a²+c²)−c + 1 mm de
+ * tolerancia; si no hay herraje definido, usa la luz global del mueble.
+ */
+export function frontGapFor(f: Furniture, c: FurnitureComponent): number {
+  const cl = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+  if (c.gap != null) return cl(c.gap, 0, 0.02);
+  let g: number;
+  switch (c.hingeType) {
+    case "cup": // cazoleta 35: el movimiento compuesto saca la tapa antes de girar
+      g = 0.003;
+      break;
+    case "pianoFront": // piano con nudo al frente: gira hacia afuera, luz solo estética
+      g = 0.002;
+      break;
+    case "custom": {
+      const a = c.hingeA ?? 0;
+      const cc = c.hingeC ?? 0;
+      g = cl(Math.hypot(a, cc) - cc + 0.001, 0.002, 0.02);
+      break;
+    }
+    case "straightBack": // eje atrás: luz normal PERO exige chanfle 45° en el canto del eje
+    default:
+      g = cl(f.frontGap ?? GAP, 0, 0.02);
+  }
+  // Tapas verticales anchas flexionan con el peso: 1 mm extra de seguridad.
+  if (c.kind === "doorFlap" && c.w > 0.9) g += 0.001;
+  return g;
+}
+
 /** Genera los paneles 3D de un mueble custom: carcasa + componentes. */
 export function buildCustomPanels(f: Furniture): Panel[] {
   const W = f.width;
@@ -476,8 +507,6 @@ export function buildCustomPanels(f: Furniture): Panel[] {
     }
   }
 
-  // Luz entre frentes (puertas, tapas, frentes de cajón). Configurable por mueble.
-  const GAPF = Math.min(Math.max(f.frontGap ?? GAP, 0), 0.02);
   const cx = (x: number, w: number) => -W / 2 + x + w / 2;
   const cyTop = (y: number, h: number) => base + y + h / 2;
   // Cara frontal de la carcasa. Los FRENTES (puertas, tapas, frentes de cajón) van
@@ -548,6 +577,7 @@ export function buildCustomPanels(f: Furniture): Panel[] {
         panels.push({ pos: [cx(c.x, c.w), cyTop(c.y, c.h), d.zc], size: [ct, c.h, d.zs], color: col, materialId: mat, role: "Placa", edges: { front: true } });
       }
     } else if (c.kind === "drawer") {
+      const g = frontGapFor(f, c);
       const n = Math.max(1, c.count ?? 1);
       const each = c.h / n;
       const pull = open * Math.min(D * 0.7, 0.4);
@@ -563,31 +593,33 @@ export function buildCustomPanels(f: Furniture): Panel[] {
         const boxZc = fz + ct / 2 + boxD / 2;
         const sideH = Math.max(each * 0.55, 0.05);
         const boxYc = fY - each / 2 + sideH / 2 + ct;
-        panels.push({ pos: [bxc, fY, fz], size: [c.w - GAPF, each - GAPF, ct], door: true, color: col, materialId: mat, role: "Frente cajón", edges: { front: true, back: true, left: true, right: true } }); // frente
+        panels.push({ pos: [bxc, fY, fz], size: [c.w - g, each - g, ct], door: true, color: col, materialId: mat, role: "Frente cajón", edges: { front: true, back: true, left: true, right: true } }); // frente
         panels.push({ pos: [bxc, fY - each / 2 + ct, boxZc], size: [c.w - 2 * ct, ct, boxD], role: "Piso cajón" }); // piso
         panels.push({ pos: [bxc, boxYc, boxZc + boxD / 2 - ct / 2], size: [c.w - 2 * ct, sideH, ct], role: "Contrafrente cajón" }); // fondo cajón
         panels.push({ pos: [bxc - c.w / 2 + ct / 2, boxYc, boxZc], size: [ct, sideH, boxD], role: "Lateral cajón" }); // lado izq
         panels.push({ pos: [bxc + c.w / 2 - ct / 2, boxYc, boxZc], size: [ct, sideH, boxD], role: "Lateral cajón" }); // lado der
       }
     } else if (c.kind === "doorHinged") {
+      const g = frontGapFor(f, c);
       const hingeLeft = (c.hinge ?? "left") === "left";
       const pivotX = hingeLeft ? cx(c.x, c.w) - c.w / 2 : cx(c.x, c.w) + c.w / 2;
       const rot = (hingeLeft ? 1 : -1) * open * Math.PI * 0.62;
       const fz = frontFace - ct / 2; // hoja sobrepuesta al frente
       panels.push({
         pos: [cx(c.x, c.w), cyTop(c.y, c.h), fz],
-        size: [c.w - GAPF, c.h - GAPF, ct],
+        size: [c.w - g, c.h - g, ct],
         door: true,
         color: col,
         materialId: mat,
         pivot: [pivotX, cyTop(c.y, c.h), fz],
         rotY: rot,
-        role: "Puerta",
+        role: c.hingeType === "straightBack" ? "Puerta (chanfle 45° lado eje)" : "Puerta",
         edges: { front: true, back: true, left: true, right: true },
       });
     } else if (c.kind === "doorFlap") {
       // Tapa de apertura vertical: rebate alrededor del borde superior ("up", con
       // brazos hidráulicos) o del borde inferior ("down", tipo bar/escritorio).
+      const g = frontGapFor(f, c);
       const dir = c.flapDir ?? "up";
       const fz = frontFace - ct / 2; // tapa sobrepuesta al frente
       const bx = cx(c.x, c.w);
@@ -597,13 +629,13 @@ export function buildCustomPanels(f: Furniture): Panel[] {
       const ang = up ? open * Math.PI * 0.55 : -open * Math.PI * 0.5;
       panels.push({
         pos: [bx, cyTop(c.y, c.h), fz],
-        size: [c.w - GAPF, c.h - GAPF, ct],
+        size: [c.w - g, c.h - g, ct],
         door: true,
         color: col,
         materialId: mat,
         pivot: [bx, pivotY, fz],
         rotX: ang,
-        role: "Tapa",
+        role: c.hingeType === "straightBack" ? "Tapa (chanfle 45° lado eje)" : "Tapa",
         edges: { front: true, back: true, left: true, right: true },
       });
       // Brazos hidráulicos (pistones a gas): unen el lateral interno con la tapa.
@@ -627,6 +659,7 @@ export function buildCustomPanels(f: Furniture): Panel[] {
     } else if (c.kind === "doorSliding") {
       // Hojas en 2 carriles bien separados, POR DELANTE de la carcasa. Cerradas:
       // tilean el hueco con leve solape. Al abrir se corren y apilan sobre la hoja 0.
+      const g = frontGapFor(f, c);
       const n = Math.max(2, c.count ?? 2);
       const seg = c.w / n;
       const overlap = c.overlap != null ? cl(c.overlap, 0, seg) : Math.min(0.04, seg * 0.12);
@@ -637,7 +670,7 @@ export function buildCustomPanels(f: Furniture): Panel[] {
         const z = frontFace - ct / 2 - track * trackGap;
         const closedX = -W / 2 + c.x + i * seg + seg / 2;
         const x = closedX - open * i * seg;
-        panels.push({ pos: [x, cyTop(c.y, c.h), z], size: [leafW - GAPF, c.h - GAPF, ct], door: true, color: col, materialId: mat, role: "Puerta corrediza", edges: { front: true, back: true, left: true, right: true } });
+        panels.push({ pos: [x, cyTop(c.y, c.h), z], size: [leafW - g, c.h - g, ct], door: true, color: col, materialId: mat, role: "Puerta corrediza", edges: { front: true, back: true, left: true, right: true } });
       }
     }
   }

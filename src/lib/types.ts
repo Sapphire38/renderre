@@ -303,6 +303,17 @@ export type FurnitureComponent = {
   /** Corrediza: solape entre hojas (m). Si falta, se calcula automático (12% del segmento, tope 4 cm). */
   overlap?: number;
   hinge?: "left" | "right"; // puerta batiente
+  /** Herraje del frente (puertas batientes y tapas): define la LUZ calculada de esta abertura.
+   *  cup = cazoleta 35 (3 mm) · pianoFront = piano con nudo al frente (2 mm) ·
+   *  straightBack = recta con eje atrás (luz normal + chanfle 45° en el canto del eje) ·
+   *  custom = eje a medida (usa hingeA/hingeC con la fórmula del arco). Sin definir → luz del mueble. */
+  hingeType?: "cup" | "pianoFront" | "straightBack" | "custom";
+  /** Herraje custom: distancia del eje a la cara EXTERIOR de la tapa (m). */
+  hingeA?: number;
+  /** Herraje custom: distancia del eje al CANTO de la tapa (m). */
+  hingeC?: number;
+  /** Luz propia de ESTA abertura (m). Pisa a la calculada por herraje y a la del mueble. */
+  gap?: number;
   /** Tapa vertical (doorFlap): hacia dónde abre. "up" = alacena con brazos hidráulicos; "down" = rebatible tipo bar/escritorio. Default "up". */
   flapDir?: "up" | "down";
   /** Tapa vertical hacia arriba: dibujar los brazos hidráulicos (pistones a gas). Default true. */

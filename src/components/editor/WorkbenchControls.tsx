@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useEditor } from "@/lib/store";
-import { FURNITURE_PRESETS, WORKSHOP_TEMPLATES, innerDepth } from "@/lib/furniture";
+import { FURNITURE_PRESETS, WORKSHOP_TEMPLATES, innerDepth, frontGapFor } from "@/lib/furniture";
 import { uid } from "@/lib/geometry";
 import type { ComponentKind, FurnitureComponent } from "@/lib/types";
 import { TrashIcon, CopyIcon } from "./icons";
@@ -378,6 +378,83 @@ function CompProps({ c }: { c: FurnitureComponent }) {
             <option value="vertical">Vertical</option>
           </select>
         </label>
+      )}
+      {/* Herraje + luz inteligente POR ABERTURA (puertas batientes y tapas verticales) */}
+      {(c.kind === "doorHinged" || c.kind === "doorFlap") && (
+        <label className="flex items-center justify-between gap-2 py-1 text-sm">
+          <span className="text-neutral-400" title="El herraje define la luz calculada de esta abertura (fórmula del arco del canto)">Herraje</span>
+          <select
+            value={c.hingeType ?? ""}
+            onFocus={beginEdit}
+            onChange={(e) => set({ hingeType: (e.target.value || undefined) as FurnitureComponent["hingeType"] })}
+            className="w-44 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100"
+          >
+            <option value="">Luz del mueble</option>
+            <option value="cup">Cazoleta 35 (3 mm)</option>
+            <option value="pianoFront">Piano al frente (2 mm)</option>
+            <option value="straightBack">Recta eje atrás (+chanfle)</option>
+            <option value="custom">Personalizado (a y c)</option>
+          </select>
+        </label>
+      )}
+      {(c.kind === "doorHinged" || c.kind === "doorFlap") && c.hingeType === "custom" && (
+        <>
+          <Num
+            label="Eje → cara ext. (a)"
+            value={mm(c.hingeA ?? 0)}
+            unit="mm"
+            min={0}
+            max={50}
+            step={0.5}
+            onChange={(v) => set({ hingeA: clamp(v / 1000, 0, 0.05) })}
+          />
+          <Num
+            label="Eje → canto (c)"
+            value={mm(c.hingeC ?? 0)}
+            unit="mm"
+            min={0}
+            max={100}
+            step={0.5}
+            onChange={(v) => set({ hingeC: clamp(v / 1000, 0, 0.1) })}
+          />
+          <p className="-mt-0.5 pb-1 text-[10px] leading-snug text-neutral-600">
+            Luz = √(a² + c²) − c + 1 mm de tolerancia.
+          </p>
+        </>
+      )}
+      {(c.kind === "doorHinged" || c.kind === "doorFlap") && c.hingeType === "straightBack" && (
+        <p className="-mt-0.5 pb-1 text-[10px] leading-snug text-amber-500/90">
+          ⚠ Requiere chanfle a 45° en el canto del lado del eje (queda anotado en el despiece).
+        </p>
+      )}
+      {(c.kind === "drawer" || c.kind === "doorHinged" || c.kind === "doorSliding" || c.kind === "doorFlap") && draft && (
+        <>
+          <Num
+            label="Luz de esta abertura"
+            value={mm(c.gap ?? frontGapFor(draft, c))}
+            unit="mm"
+            min={0}
+            max={20}
+            step={0.5}
+            onChange={(v) => set({ gap: clamp(v / 1000, 0, 0.02) })}
+          />
+          {c.gap != null ? (
+            <div className="-mt-1 flex justify-end pb-1">
+              <button
+                type="button"
+                onClick={() => setStep({ gap: undefined })}
+                title="Volver a la luz calculada por herraje / la del mueble"
+                className="text-[11px] text-neutral-500 hover:text-neutral-300"
+              >
+                ↺ usar luz automática
+              </button>
+            </div>
+          ) : (
+            <p className="-mt-0.5 pb-1 text-[10px] leading-snug text-neutral-600">
+              Automática{c.kind === "doorFlap" && c.w > 0.9 ? " (incluye +1 mm por tapa ancha)" : ""}: se descuenta de la medida de corte.
+            </p>
+          )}
+        </>
       )}
       {(c.kind === "drawer" || c.kind === "doorHinged" || c.kind === "doorSliding" || c.kind === "doorFlap") && (
         <label className="block py-1 text-sm">
